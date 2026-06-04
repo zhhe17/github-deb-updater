@@ -2,6 +2,15 @@
 
 > 一站式管理来自 GitHub Release 的 `.deb` 软件包，类比 `apt update && apt upgrade`，但专门针对不在 apt 源中、仅在 GitHub 发布 deb 包的开源软件。
 
+### 主要特性
+
+- **批量管理**：通过 `packages.yaml` 集中管理所有 GitHub deb 软件包
+- **版本检测**：自动对比本地版本与 GitHub Release 最新版本
+- **一键更新**：`sudo github-deb-updater -y upgrade` 更新所有软件
+- **智能重试**：GitHub API 请求失败时自动重试（网络抖动、速率限制）
+- **Token 管理**：`token` 命令一键保存 Token，解决 sudo 环境变量丢失问题
+- **美观输出**：动态宽度的方框输出，中英文完美对齐
+
 ---
 
 ## 快速开始
@@ -9,7 +18,7 @@
 ### 1. 安装
 
 ```bash
-git clone https://github.com/yourusername/github-deb-updater.git
+git clone https://github.com/hezihao-hfut/github-deb-updater.git
 cd github-deb-updater
 chmod +x install.sh
 ./install.sh
@@ -27,7 +36,14 @@ packages:
     asset_pattern: "Clash.Verge_*_amd64.deb"
 ```
 
-### 3. 使用
+### 3. 配置 GitHub Token（推荐）
+
+```bash
+# 保存 Token 到配置文件（解决 sudo 下环境变量丢失问题）
+github-deb-updater token
+```
+
+### 4. 使用
 
 ```bash
 # 列出所有软件状态
@@ -101,6 +117,7 @@ packages:
 | `upgrade <name>` | 仅更新指定软件 |
 | `list` | 列出名单中所有软件及其当前状态 |
 | `add` | 交互式向 packages.yaml 添加新软件 |
+| `token` | 保存 GitHub Token 到配置文件（用于 sudo 场景） |
 | `version` | 显示工具本身的版本信息 |
 
 ### 选项
@@ -138,6 +155,9 @@ github-deb-updater --config /path/to/my-packages.yaml list
 
 # 显示详细调试信息
 github-deb-updater --verbose update
+
+# 保存 GitHub Token（解决 sudo 下环境变量丢失问题）
+github-deb-updater token
 ```
 
 ---
@@ -157,7 +177,16 @@ GitHub API 对未认证请求有速率限制（60 次/小时）。配置 Token �
 
 ### 配置方式
 
-**方式 1：环境变量（推荐）**
+**方式 1：使用 `token` 命令（推荐）**
+
+```bash
+# 交互式保存 Token 到配置文件
+github-deb-updater token
+```
+
+Token 会保存到 `packages.yaml` 同目录下的 `.token` 文件（权限 600），`sudo` 运行时自动读取。
+
+**方式 2：环境变量**
 
 ```bash
 # 添加到 ~/.bashrc 或 ~/.zshrc
@@ -167,11 +196,25 @@ export GITHUB_TOKEN="your_token_here"
 source ~/.bashrc
 ```
 
-**方式 2：命令行参数**
+> **注意**：`sudo` 默认不继承环境变量。如使用环境变量方式，需用 `sudo -E` 保留环境：
+> ```bash
+> sudo -E github-deb-updater -y upgrade
+> ```
+
+**方式 3：命令行参数**
 
 ```bash
-github-deb-updater --token "your_token_here" update
+sudo github-deb-updater --token "$GITHUB_TOKEN" -y upgrade
 ```
+
+### Token 自动查找顺序
+
+当通过 `sudo` 运行时，脚本会按以下顺序自动查找 Token：
+
+1. `--token` 命令行参数
+2. `GITHUB_TOKEN` 环境变量
+3. 原始用户（`SUDO_USER`）的环境变量
+4. `.token` 配置文件
 
 ---
 
