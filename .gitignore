@@ -1,0 +1,11 @@
+# 忽略缓存目录中的下载文件
+cache/*.deb
+
+# 忽略日志文件
+logs/*.log
+
+# 忽略测试报告
+test-report.txt
+
+# 忽略 Token 文件（敏感信息）
+.token

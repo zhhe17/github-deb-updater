@@ -1,0 +1,44 @@
+# packages.yaml - GitHub deb 软件更新名单
+# 格式说明:
+#   name: 软件包名称（用于 dpkg -l 查询）
+#   display_name: 显示名称（可选）
+#   repo: GitHub 仓库（owner/repo 格式）
+#   asset_pattern: Release 资产文件名匹配模式（支持通配符）
+#   pre_install: 安装前执行的命令（可选）
+#   post_install: 安装后执行的命令（可选）
+
+packages:
+  - name: "clash-verge"
+    display_name: "Clash Verge"
+    repo: "clash-verge-rev/clash-verge-rev"
+    asset_pattern: "Clash.Verge_*_amd64.deb"
+
+  - name: "cc-switch"
+    display_name: "CC-Switch"
+    repo: "farion1231/cc-switch"
+    asset_pattern: "CC-Switch-v*-Linux-x86_64.deb"
+
+  - name: "cockpit-tools"
+    display_name: "Cockpit Tools"
+    repo: "jlcodes99/cockpit-tools"
+    asset_pattern: "Cockpit.Tools_*_amd64.deb"
+
+  - name: "localsend"
+    display_name: "LocalSend"
+    repo: "localsend/localsend"
+    asset_pattern: "LocalSend-*-linux-x86-64.deb"
+
+  - name: "rustdesk"
+    display_name: "RustDesk"
+    repo: "rustdesk/rustdesk"
+    asset_pattern: "rustdesk-*-x86_64.deb"
+
+  - name: "hiddify"
+    display_name: "Hiddify"
+    repo: "hiddify/hiddify-app"
+    asset_pattern: "Hiddify-Debian-x64.deb"
+
+  - name: "clashmi"
+    display_name: "ClashMi"
+    repo: "KaringX/clashmi"
+    asset_pattern: "clashmi_*_linux_amd64.deb"
