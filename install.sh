@@ -1,11 +1,12 @@
 #!/bin/bash
 # install.sh - 一键安装脚本
-# 版本: 1.0
+# 版本: 2.0
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 CONFIG_DIR="${HOME}/.config/github-deb-updater"
+INSTALL_DIR="/opt/github-deb-updater"
 
 # 计算字符串的终端显示宽度（中文/全角字符占2列，ASCII占1列）
 dwidth() {
@@ -72,9 +73,10 @@ box_bottom() {
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-_header_title="         GitHub deb 软件自动更新工具 - 安装程序"
+_header_title="         GitHub deb 软件自动更新工具 - 安装程序 v2.0"
 _header_w=$(( $(dwidth "$_header_title") + 2 ))
 box_top "$_header_w"
 box_print "$_header_title" "$_header_w"
@@ -99,6 +101,10 @@ check_dependencies() {
         missing_deps+=("sudo")
     fi
     
+    if ! command -v python3 &>/dev/null; then
+        missing_deps+=("python3")
+    fi
+    
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         echo -e "${RED}错误: 缺少以下依赖:${NC}"
         for dep in "${missing_deps[@]}"; do
@@ -113,10 +119,10 @@ check_dependencies() {
     echo -e "${GREEN}✓ 所有依赖已满足${NC}"
 }
 
-# 安装主程序
-install_program() {
+# 安装 CLI 版本
+install_cli() {
     echo ""
-    echo "安装主程序..."
+    echo "安装 CLI 版本..."
     
     # 创建符号链接
     local target_link="/usr/local/bin/github-deb-updater"
@@ -140,7 +146,48 @@ install_program() {
     echo "创建符号链接: $target_link -> $source_script"
     sudo ln -s "$source_script" "$target_link"
     
-    echo -e "${GREEN}✓ 主程序已安装${NC}"
+    echo -e "${GREEN}✓ CLI 版本已安装${NC}"
+}
+
+# 安装 Web 版本
+install_web() {
+    echo ""
+    echo "安装 Web 版本..."
+    
+    # 复制文件到安装目录
+    if [[ -d "$INSTALL_DIR" ]]; then
+        echo "移除旧的安装目录..."
+        sudo rm -rf "$INSTALL_DIR"
+    fi
+    
+    echo "复制文件到 $INSTALL_DIR..."
+    sudo mkdir -p "$INSTALL_DIR"
+    sudo cp -r "${SCRIPT_DIR}/app" "$INSTALL_DIR/"
+    sudo cp -r "${SCRIPT_DIR}/static" "$INSTALL_DIR/"
+    sudo cp "${SCRIPT_DIR}/packages.yaml" "$INSTALL_DIR/"
+    sudo cp "${SCRIPT_DIR}/config.yaml" "$INSTALL_DIR/"
+    sudo cp "${SCRIPT_DIR}/requirements.txt" "$INSTALL_DIR/"
+    
+    # 安装 Python 依赖
+    echo "安装 Python 依赖..."
+    sudo pip3 install -r "${SCRIPT_DIR}/requirements.txt" --quiet 2>/dev/null || {
+        echo -e "${YELLOW}警告: pip3 安装失败，尝试使用 apt 安装...${NC}"
+        sudo apt-get install -y python3-fastapi python3-uvicorn python3-jinja2 python3-httpx python3-yaml python3-packaging 2>/dev/null || {
+            echo -e "${RED}错误: 无法安装 Python 依赖${NC}"
+            echo "请手动运行: sudo pip3 install -r ${SCRIPT_DIR}/requirements.txt"
+            exit 1
+        }
+    }
+    
+    # 创建缓存和日志目录
+    sudo mkdir -p "$INSTALL_DIR/cache" "$INSTALL_DIR/logs"
+    
+    # 安装 systemd 服务
+    echo "安装 systemd 服务..."
+    sudo cp "${SCRIPT_DIR}/github-deb-updater.service" /etc/systemd/system/
+    sudo systemctl daemon-reload
+    
+    echo -e "${GREEN}✓ Web 版本已安装${NC}"
 }
 
 # 创建默认配置
@@ -172,12 +219,16 @@ show_completion() {
     local lines=(
         "                    安装完成！"
         ""
-        "  您现在可以在任意位置使用以下命令:"
-        ""
+        "  CLI 版本:"
         "  github-deb-updater list       列出所有软件状态"
         "  github-deb-updater update     检查更新"
         "  github-deb-updater upgrade    更新所有软件"
         "  github-deb-updater --help     查看帮助"
+        ""
+        "  Web 版本:"
+        "  启动服务: sudo systemctl start github-deb-updater"
+        "  访问地址: http://localhost:8000"
+        "  API 文档: http://localhost:8000/docs"
         ""
         "  配置文件位置: ~/.config/github-deb-updater/packages.yaml"
         ""
@@ -204,7 +255,34 @@ show_completion() {
 # 主函数
 main() {
     check_dependencies
-    install_program
+    
+    # 询问安装类型
+    echo ""
+    echo "请选择安装类型:"
+    echo "  1) 仅 CLI 版本（命令行工具）"
+    echo "  2) 仅 Web 版本（浏览器界面）"
+    echo "  3) 全部安装（CLI + Web）"
+    echo ""
+    read -p "请输入选项 [1/2/3]: " choice
+    
+    case "$choice" in
+        1)
+            install_cli
+            ;;
+        2)
+            install_web
+            ;;
+        3)
+            install_cli
+            install_web
+            ;;
+        *)
+            echo -e "${RED}无效选项，使用默认选项 3（全部安装）${NC}"
+            install_cli
+            install_web
+            ;;
+    esac
+    
     setup_config
     show_completion
 }

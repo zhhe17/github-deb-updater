@@ -1,0 +1,16 @@
+[Unit]
+Description=GitHub deb 软件自动更新工具 - Web 服务
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/hezihao/桌面/github-deb-updater
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/hezihao/桌面/github-deb-updater/.env
+
+[Install]
+WantedBy=multi-user.target

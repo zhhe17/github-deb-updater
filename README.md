@@ -2,14 +2,12 @@
 
 > 一站式管理来自 GitHub Release 的 `.deb` 软件包，类比 `apt update && apt upgrade`，但专门针对不在 apt 源中、仅在 GitHub 发布 deb 包的开源软件。
 
-### 主要特性
+## 版本说明
 
-- **批量管理**：通过 `packages.yaml` 集中管理所有 GitHub deb 软件包
-- **版本检测**：自动对比本地版本与 GitHub Release 最新版本
-- **一键更新**：`sudo github-deb-updater -y upgrade` 更新所有软件
-- **智能重试**：GitHub API 请求失败时自动重试（网络抖动、速率限制）
-- **Token 管理**：`token` 命令一键保存 Token，解决 sudo 环境变量丢失问题
-- **美观输出**：动态宽度的方框输出，中英文完美对齐
+本项目提供两个版本：
+
+- **CLI 版本**：命令行工具，适合终端用户
+- **Web 版本**：浏览器界面，提供图形化管理
 
 ---
 
@@ -23,6 +21,11 @@ cd github-deb-updater
 chmod +x install.sh
 ./install.sh
 ```
+
+安装程序会询问安装类型：
+- `1` - 仅 CLI 版本
+- `2` - 仅 Web 版本
+- `3` - 全部安装（默认）
 
 ### 2. 配置软件包列表
 
@@ -39,12 +42,16 @@ packages:
 ### 3. 配置 GitHub Token（推荐）
 
 ```bash
-# 保存 Token 到配置文件（解决 sudo 下环境变量丢失问题）
+# CLI 版本
 github-deb-updater token
+
+# Web 版本
+# 在设置页面中配置
 ```
 
 ### 4. 使用
 
+**CLI 版本：**
 ```bash
 # 列出所有软件状态
 github-deb-updater list
@@ -55,6 +62,37 @@ github-deb-updater update
 # 更新所有软件（需要 sudo 权限）
 sudo github-deb-updater -y upgrade
 ```
+
+**Web 版本：**
+```bash
+# 启动服务
+sudo systemctl start github-deb-updater
+
+# 访问界面
+# http://localhost:8000
+```
+
+---
+
+## Web 版本功能
+
+### 主要特性
+
+- **图形化界面**：直观的卡片式软件包展示
+- **一键更新**：点击按钮即可更新软件
+- **批量操作**：支持一键更新所有软件
+- **实时进度**：WebSocket 实时显示下载和安装进度
+- **设置管理**：在界面上配置 Token 和添加软件包
+- **API 文档**：自动生成的 API 文档（/docs）
+
+### 界面截图
+
+![软件包列表](docs/images/package-list.png)
+
+### 系统要求
+
+- Python 3.10+
+- root 权限（用于安装 deb 包）
 
 ---
 
@@ -106,7 +144,7 @@ packages:
 
 ---
 
-## 命令参考
+## CLI 命令参考
 
 ### 命令
 
@@ -162,6 +200,27 @@ github-deb-updater token
 
 ---
 
+## Web API 参考
+
+启动 Web 服务后，访问 http://localhost:8000/docs 查看完整的 API 文档。
+
+### 主要 API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/packages/` | 软件包列表页面 |
+| GET | `/packages/api/list` | 获取软件包列表（JSON） |
+| GET | `/packages/api/check` | 检查更新 |
+| POST | `/packages/api/add` | 添加软件包 |
+| DELETE | `/packages/api/{name}` | 删除软件包 |
+| POST | `/updates/api/upgrade/{name}` | 更新单个软件包 |
+| POST | `/updates/api/upgrade-all` | 批量更新 |
+| WebSocket | `/updates/ws/upgrade/{name}` | 实时更新进度 |
+| GET | `/settings/` | 设置页面 |
+| POST | `/settings/api/token` | 设置 GitHub Token |
+
+---
+
 ## GitHub Token 配置
 
 ### 为什么需要 Token？
@@ -177,16 +236,18 @@ GitHub API 对未认证请求有速率限制（60 次/小时）。配置 Token �
 
 ### 配置方式
 
-**方式 1：使用 `token` 命令（推荐）**
+**方式 1：Web 界面（推荐）**
+
+访问 http://localhost:8000/settings/，在设置页面中配置 Token。
+
+**方式 2：CLI 命令**
 
 ```bash
 # 交互式保存 Token 到配置文件
 github-deb-updater token
 ```
 
-Token 会保存到 `packages.yaml` 同目录下的 `.token` 文件（权限 600），`sudo` 运行时自动读取。
-
-**方式 2：环境变量**
+**方式 3：环境变量**
 
 ```bash
 # 添加到 ~/.bashrc 或 ~/.zshrc
@@ -196,25 +257,12 @@ export GITHUB_TOKEN="your_token_here"
 source ~/.bashrc
 ```
 
-> **注意**：`sudo` 默认不继承环境变量。如使用环境变量方式，需用 `sudo -E` 保留环境：
-> ```bash
-> sudo -E github-deb-updater -y upgrade
-> ```
+**方式 4：配置文件**
 
-**方式 3：命令行参数**
-
-```bash
-sudo github-deb-updater --token "$GITHUB_TOKEN" -y upgrade
+编辑 `config.yaml`：
+```yaml
+github_token: "your_token_here"
 ```
-
-### Token 自动查找顺序
-
-当通过 `sudo` 运行时，脚本会按以下顺序自动查找 Token：
-
-1. `--token` 命令行参数
-2. `GITHUB_TOKEN` 环境变量
-3. 原始用户（`SUDO_USER`）的环境变量
-4. `.token` 配置文件
 
 ---
 

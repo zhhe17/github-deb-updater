@@ -1,0 +1,45 @@
+/* 自定义样式 */
+
+/* 平滑滚动 */
+html {
+    scroll-behavior: smooth;
+}
+
+/* 表格行悬停效果 */
+tbody tr {
+    transition: background-color 0.15s ease-in-out;
+}
+
+/* 按钮禁用状态 */
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+/* 加载动画 */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+
+/* 通知动画 */
+[x-cloak] {
+    display: none !important;
+}
+
+/* 响应式表格 */
+@media (max-width: 768px) {
+    table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+}

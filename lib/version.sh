@@ -30,31 +30,58 @@ get_installed_version() {
     return 0
 }
 
+# 标准化版本号（去除构建元数据和常见前缀）
+# 处理格式：
+#   desktop-v1.6.0  -> 去除前缀 -> 1.6.0
+#   v1.6.0          -> 去除前缀 -> 1.6.0
+#   V1.6.0          -> 去除前缀 -> 1.6.0
+#   release-1.6.0   -> 去除前缀 -> 1.6.0
+#   app-1.6.0       -> 去除前缀 -> 1.6.0
+#   1.0.24+1006     -> + 后为构建元数据，去掉 -> 1.0.24
+#   1.0.24.1006     -> 四段版本号，最后一段为构建号，去掉 -> 1.0.24
+_normalize_version() {
+    local version="$1"
+    # 去除常见的版本前缀（匹配最后一个 -v 或 _v 之后的内容，或者开头的 v/V）
+    # 例如: desktop-v1.6.0 -> 1.6.0, app-v2.0.0 -> 2.0.0
+    if [[ "$version" =~ [-_]v?([0-9].*)$ ]]; then
+        version="${BASH_REMATCH[1]}"
+    elif [[ "$version" =~ ^[vV]([0-9].*)$ ]]; then
+        version="${BASH_REMATCH[1]}"
+    fi
+    # 去除 + 及其后的构建元数据（语义化版本规范）
+    version="${version%%+*}"
+    # 如果版本号有 4 段或更多，去掉最后一段（构建号）
+    # 仅当恰好 4 段且最后一段为纯数字时处理
+    if [[ "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+$ ]]; then
+        version="${BASH_REMATCH[1]}"
+    fi
+    echo "$version"
+}
+
 # 比较两个版本号
 # 返回值: 0（相等）、1（a > b）、2（a < b）
 version_compare() {
     local version_a="$1"
     local version_b="$2"
-    
-    # 如果版本号相同，直接返回 0
-    if [[ "$version_a" == "$version_b" ]]; then
+
+    # 去除构建元数据
+    local norm_a norm_b
+    norm_a=$(_normalize_version "$version_a")
+    norm_b=$(_normalize_version "$version_b")
+
+    # 标准化后相同，视为相等
+    if [[ "$norm_a" == "$norm_b" ]]; then
         return 0
     fi
-    
+
     # 使用 sort -V 进行版本比较
-    # sort -V 进行自然版本排序
     local sorted
-    sorted=$(printf '%s\n%s\n' "$version_a" "$version_b" | sort -V)
+    sorted=$(printf '%s\n%s\n' "$norm_a" "$norm_b" | sort -V)
     local first
     first=$(echo "$sorted" | head -n1)
-    
-    if [[ "$first" == "$version_a" ]]; then
-        # a <= b
-        if [[ "$version_a" == "$version_b" ]]; then
-            return 0
-        else
-            return 2  # a < b
-        fi
+
+    if [[ "$first" == "$norm_a" ]]; then
+        return 2  # a < b
     else
         return 1  # a > b
     fi
