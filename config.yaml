@@ -1,22 +1,8 @@
-# GitHub deb 软件自动更新工具 - 应用配置
-
-# GitHub Token（可选，提高 API 速率限制）
-# 也可以通过环境变量 GITHUB_TOKEN 设置
-github_token: ""
-
-# 缓存目录
-cache_dir: "cache"
-
-# 日志目录
-log_dir: "logs"
-
-# 软件包配置文件路径
-packages_file: "packages.yaml"
-
-# 自动检查更新间隔（秒），0 表示禁用
 auto_check_interval: 3600
-
-# Web 服务配置
+cache_dir: cache
+github_token: ''
+log_dir: logs
+packages_file: packages.yaml
 server:
-  host: "0.0.0.0"
+  host: 0.0.0.0
   port: 8000

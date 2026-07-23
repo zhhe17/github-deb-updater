@@ -41,9 +41,3 @@ packages:
   post_install: ''
   pre_install: ''
   repo: marktext/marktext
-- asset_pattern: Reasonix-linux-amd64.deb
-  display_name: Reasonix
-  name: reasonix-desktop
-  post_install: ''
-  pre_install: ''
-  repo: esengine/DeepSeek-Reasonix

@@ -34,50 +34,65 @@ async def download_deb(
         url: 下载链接
         package_name: 软件包名称
         version: 版本号
-        progress_callback: 进度回调函数 (downloaded, total)
+        progress_callback: 进度回调函数 (downloaded, total, progress)
 
     Returns:
         Path: 下载的文件路径，失败返回 None
     """
     cache_dir = config.cache_path
-    target_path = cache_dir / f"{package_name}_{version}.deb"
+    # 版本号里可能有 + 等字符，做简单清洗
+    safe_version = version.replace("/", "_")
+    target_path = cache_dir / f"{package_name}_{safe_version}.deb"
 
-    # 检查缓存是否存在且完整
     if target_path.exists():
-        if _verify_deb(target_path):
+        if await asyncio.to_thread(_verify_deb, target_path):
+            if progress_callback:
+                await progress_callback(1, 1, 100)
             return target_path
-        else:
-            target_path.unlink()
+        target_path.unlink(missing_ok=True)
 
-    # 下载文件
+    tmp_path = target_path.with_suffix(".deb.partial")
     try:
         async with httpx.AsyncClient(
-            timeout=300.0, follow_redirects=True, proxy=_get_proxy_url()
+            timeout=httpx.Timeout(300.0, connect=30.0),
+            follow_redirects=True,
+            proxy=_get_proxy_url(),
         ) as client:
             async with client.stream("GET", url) as response:
                 if response.status_code != 200:
+                    print(f"[download] HTTP {response.status_code}: {url}")
                     return None
 
                 total = int(response.headers.get("content-length", 0))
                 downloaded = 0
+                last_reported = -1
 
-                with open(target_path, "wb") as f:
-                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                with open(tmp_path, "wb") as f:
+                    async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
                         f.write(chunk)
                         downloaded += len(chunk)
 
                         if progress_callback and total > 0:
                             progress = int(downloaded * 100 / total)
-                            await progress_callback(downloaded, total, progress)
+                            # 降低推送频率，避免刷爆 WebSocket
+                            if progress != last_reported and (
+                                progress == 100 or progress - last_reported >= 2
+                            ):
+                                last_reported = progress
+                                await progress_callback(downloaded, total, progress)
 
-    except (httpx.NetworkError, httpx.TimeoutException, IOError):
+        tmp_path.replace(target_path)
+
+    except (httpx.NetworkError, httpx.TimeoutException, IOError) as e:
+        print(f"[download] 失败: {type(e).__name__}: {e}")
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
         if target_path.exists():
-            target_path.unlink()
+            target_path.unlink(missing_ok=True)
         return None
 
-    # 验证下载的文件
-    if not _verify_deb(target_path):
-        target_path.unlink()
+    if not await asyncio.to_thread(_verify_deb, target_path):
+        target_path.unlink(missing_ok=True)
         return None
 
     return target_path
@@ -96,32 +111,40 @@ def _verify_deb(path: Path) -> bool:
         return False
 
 
+def _run_shell(cmd: str, timeout: int = 60) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _run_cmd(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
 async def install_deb(
     deb_path: Path,
     pre_install_cmd: str = "",
     post_install_cmd: str = "",
 ) -> UpdateResult:
-    """安装 deb 包
-
-    Returns:
-        UpdateResult: 安装结果
-    """
+    """安装 deb 包（子进程放到线程池，避免阻塞事件循环）"""
     package_name = deb_path.stem.split("_")[0]
 
-    # 执行前置命令
     if pre_install_cmd:
         try:
-            result = subprocess.run(
-                pre_install_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            result = await asyncio.to_thread(_run_shell, pre_install_cmd, 60)
             if result.returncode != 0:
                 return UpdateResult(
                     success=False,
-                    message=f"前置命令执行失败: {result.stderr}",
+                    message=f"前置命令执行失败: {result.stderr or result.stdout}",
                     package_name=package_name,
                 )
         except subprocess.TimeoutExpired:
@@ -131,27 +154,41 @@ async def install_deb(
                 package_name=package_name,
             )
 
-    # 安装 deb 包
     try:
-        result = subprocess.run(
-            ["sudo", "dpkg", "-i", str(deb_path)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        # 优先直接 dpkg；若当前进程已是 root，不需要 sudo
+        if os.geteuid() == 0:
+            install_args = ["dpkg", "-i", str(deb_path)]
+            fix_args = ["apt-get", "install", "-f", "-y"]
+        else:
+            install_args = ["sudo", "-n", "dpkg", "-i", str(deb_path)]
+            fix_args = ["sudo", "-n", "apt-get", "install", "-f", "-y"]
+
+        result = await asyncio.to_thread(_run_cmd, install_args, 180)
 
         if result.returncode != 0:
-            # 尝试修复依赖
-            fix_result = subprocess.run(
-                ["sudo", "apt-get", "install", "-f", "-y"],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
+            # 可能是依赖问题，尝试修复
+            fix_result = await asyncio.to_thread(_run_cmd, fix_args, 180)
             if fix_result.returncode != 0:
+                err = (result.stderr or result.stdout or "").strip()
+                if "password" in err.lower() or "a password is required" in err.lower():
+                    err = (
+                        "需要 root 权限安装 deb。"
+                        "请用 root 启动 Web 服务，或配置免密 sudo。"
+                        f" 原始错误: {err}"
+                    )
                 return UpdateResult(
                     success=False,
-                    message=f"安装失败: {result.stderr}",
+                    message=f"安装失败: {err or '未知错误'}",
+                    package_name=package_name,
+                )
+
+            # 修复依赖后再装一次
+            result = await asyncio.to_thread(_run_cmd, install_args, 180)
+            if result.returncode != 0:
+                err = (result.stderr or result.stdout or "").strip()
+                return UpdateResult(
+                    success=False,
+                    message=f"安装失败: {err or '未知错误'}",
                     package_name=package_name,
                 )
 
@@ -161,19 +198,18 @@ async def install_deb(
             message="安装超时",
             package_name=package_name,
         )
+    except FileNotFoundError as e:
+        return UpdateResult(
+            success=False,
+            message=f"命令不存在: {e}",
+            package_name=package_name,
+        )
 
-    # 执行后置命令
     if post_install_cmd:
         try:
-            subprocess.run(
-                post_install_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            await asyncio.to_thread(_run_shell, post_install_cmd, 60)
         except subprocess.TimeoutExpired:
-            pass  # 后置命令超时不影响安装结果
+            pass
 
     return UpdateResult(
         success=True,
@@ -183,20 +219,20 @@ async def install_deb(
 
 
 def cleanup_cache(max_age_days: int = 7):
-    """清理旧缓存文件
-
-    Args:
-        max_age_days: 最大保留天数
-    """
+    """清理旧缓存文件"""
     cache_dir = config.cache_path
     if not cache_dir.exists():
         return
 
     import time
+
     current_time = time.time()
     max_age_seconds = max_age_days * 24 * 3600
 
     for deb_file in cache_dir.glob("*.deb"):
-        file_age = current_time - deb_file.stat().st_mtime
-        if file_age > max_age_seconds:
-            deb_file.unlink()
+        try:
+            file_age = current_time - deb_file.stat().st_mtime
+            if file_age > max_age_seconds:
+                deb_file.unlink()
+        except OSError:
+            pass

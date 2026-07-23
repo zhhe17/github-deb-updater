@@ -9,6 +9,7 @@ test-report.txt
 
 # 忽略 Token 文件（敏感信息）
 .token
+.env
 
 # Python 相关
 __pycache__/

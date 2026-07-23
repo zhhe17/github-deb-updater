@@ -3,152 +3,147 @@
 {% block title %}软件包列表 - GitHub deb 更新工具{% endblock %}
 
 {% block content %}
-<div x-data="packageList()" x-init="init()">
-    <!-- 顶部统计卡片 -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <div class="bg-white rounded-lg shadow p-6">
-            <div class="text-sm font-medium text-gray-500">总计</div>
-            <div class="mt-1 text-3xl font-semibold text-gray-900" x-text="total"></div>
+<div x-data="packageList()" x-init="init()" x-cloak>
+    <!-- 顶部统计 -->
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-label">总计</div>
+            <div class="stat-value" x-text="total">0</div>
         </div>
-        <div class="bg-white rounded-lg shadow p-6">
-            <div class="text-sm font-medium text-gray-500">已是最新</div>
-            <div class="mt-1 text-3xl font-semibold text-success" x-text="up_to_date"></div>
+        <div class="stat-card">
+            <div class="stat-label">已是最新</div>
+            <div class="stat-value success" x-text="up_to_date">0</div>
         </div>
-        <div class="bg-white rounded-lg shadow p-6">
-            <div class="text-sm font-medium text-gray-500">可更新</div>
-            <div class="mt-1 text-3xl font-semibold text-warning" x-text="update_available"></div>
+        <div class="stat-card">
+            <div class="stat-label">可更新</div>
+            <div class="stat-value warning" x-text="update_available">0</div>
         </div>
-        <div class="bg-white rounded-lg shadow p-6">
-            <div class="text-sm font-medium text-gray-500">未安装</div>
-            <div class="mt-1 text-3xl font-semibold text-gray-400" x-text="not_installed"></div>
+        <div class="stat-card">
+            <div class="stat-label">未安装</div>
+            <div class="stat-value muted" x-text="not_installed">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">错误</div>
+            <div class="stat-value danger" x-text="errors">0</div>
         </div>
     </div>
 
     <!-- 操作栏 -->
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">软件包管理</h1>
-        <div class="flex space-x-3">
-            <button @click="checkUpdates()" 
-                    :disabled="checking"
-                    class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50">
-                <svg class="w-4 h-4 mr-2" :class="{'animate-spin': checking}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                </svg>
-                <span x-text="checking ? '检查中...' : '刷新'">刷新</span>
+    <div class="page-header">
+        <h1 class="page-title">软件包管理</h1>
+        <div class="btn-group">
+            <button type="button"
+                    class="btn btn-secondary"
+                    @click="checkUpdates()"
+                    :disabled="checking || upgrading">
+                <span class="spinner" x-show="checking"></span>
+                <span x-text="checking ? '检查中...' : '刷新'"></span>
             </button>
-            <button @click="upgradeAll()" 
-                    :disabled="upgrading || update_available === 0"
-                    class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-                </svg>
-                <span x-text="upgrading ? '更新中...' : '全部更新'">全部更新</span>
+            <button type="button"
+                    class="btn btn-primary"
+                    @click="upgradeAll()"
+                    :disabled="upgrading || checking || update_available === 0"
+                    :title="update_available === 0 ? '当前没有可更新的软件包' : '更新所有可升级软件包'">
+                <span class="spinner" x-show="upgrading && !currentUpgrade"></span>
+                <span x-text="upgrading ? '更新中...' : '全部更新'"></span>
             </button>
         </div>
     </div>
 
-    <!-- 软件包列表 -->
-    <div class="bg-white shadow rounded-lg overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
+    <!-- 列表 -->
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
                 <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">软件包</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">本地版本</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最新版本</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
-                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                    <th>软件包</th>
+                    <th>本地版本</th>
+                    <th>最新版本</th>
+                    <th>状态</th>
+                    <th style="text-align:right">操作</th>
                 </tr>
             </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
+            <tbody>
+                <tr x-show="loading && packages.length === 0" class="loading-row">
+                    <td colspan="5">
+                        <div class="inline-loading" style="justify-content:center">
+                            <span class="spinner lg"></span>
+                            <span>正在检查更新（请求 GitHub，可能需要十几秒）...</span>
+                        </div>
+                    </td>
+                </tr>
+
                 <template x-for="pkg in packages" :key="pkg.name">
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="flex items-center">
-                                <div>
-                                    <div class="text-sm font-medium text-gray-900" x-text="pkg.display_name"></div>
-                                    <div class="text-sm text-gray-500" x-text="pkg.repo"></div>
-                                </div>
-                            </div>
+                    <tr>
+                        <td>
+                            <div class="pkg-name" x-text="pkg.display_name"></div>
+                            <div class="pkg-repo" x-text="pkg.repo"></div>
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="text-sm text-gray-900" x-text="pkg.local_version || '-'"></div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="text-sm text-gray-900" x-text="pkg.latest_version || '-'"></div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                            <span x-show="pkg.status === 'up_to_date'"
-                                  class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                已是最新
-                            </span>
-                            <span x-show="pkg.status === 'update_available'"
-                                  class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                可更新
-                            </span>
-                            <span x-show="pkg.status === 'not_installed'"
-                                  class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                未安装
-                            </span>
-                            <span x-show="pkg.status === 'error'"
-                                  class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800"
-                                  :title="pkg.error_message">
+                        <td x-text="pkg.local_version || '-'"></td>
+                        <td x-text="pkg.latest_version || '-'"></td>
+                        <td>
+                            <span class="badge badge-success" x-show="pkg.status === 'up_to_date'">已是最新</span>
+                            <span class="badge badge-warning" x-show="pkg.status === 'update_available'">可更新</span>
+                            <span class="badge badge-muted" x-show="pkg.status === 'not_installed'">未安装</span>
+                            <span class="badge badge-danger"
+                                  x-show="pkg.status === 'error'"
+                                  :title="pkg.error_message || ''">
                                 错误
                             </span>
+                            <div class="pkg-repo" x-show="pkg.status === 'error' && pkg.error_message"
+                                 x-text="pkg.error_message" style="margin-top:0.25rem;max-width:14rem"></div>
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <button x-show="pkg.status === 'update_available' || pkg.status === 'not_installed'"
-                                    @click="upgrade(pkg.name)"
-                                    :disabled="upgradingPackages.includes(pkg.name)"
-                                    class="inline-flex items-center px-3 py-1.5 border border-transparent rounded-md text-sm font-medium text-white bg-primary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50">
-                                <svg x-show="upgradingPackages.includes(pkg.name)" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                <span x-text="upgradingPackages.includes(pkg.name) ? '更新中' : '更新'"></span>
+                        <td class="actions">
+                            <button type="button"
+                                    class="btn btn-primary btn-sm"
+                                    x-show="pkg.status === 'update_available' || pkg.status === 'not_installed'"
+                                    @click="upgrade(pkg)"
+                                    :disabled="upgrading || checking || isUpgrading(pkg.name)">
+                                <span class="spinner" x-show="isUpgrading(pkg.name)"></span>
+                                <span x-text="isUpgrading(pkg.name) ? '更新中' : (pkg.status === 'not_installed' ? '安装' : '更新')"></span>
                             </button>
                             <span x-show="pkg.status !== 'update_available' && pkg.status !== 'not_installed'"
-                                  class="text-gray-400">-</span>
+                                  style="color:var(--gray-400)">-</span>
                         </td>
                     </tr>
                 </template>
-                <tr x-show="packages.length === 0">
-                    <td colspan="5" class="px-6 py-12 text-center text-gray-500">
-                        暂无软件包数据
+
+                <tr x-show="!loading && packages.length === 0">
+                    <td colspan="5" class="empty-row">
+                        暂无软件包。请到「设置」页添加，或编辑 packages.yaml。
                     </td>
                 </tr>
             </tbody>
         </table>
     </div>
 
-    <!-- 更新时间 -->
-    <div class="mt-4 text-sm text-gray-500 text-right">
+    <div class="meta-right">
         最后检查: <span x-text="checked_at"></span>
     </div>
 
-    <!-- 通知弹窗 -->
-    <div x-show="notification.show" 
-         x-transition:enter="transition ease-out duration-300"
-         x-transition:enter-start="opacity-0 translate-y-2"
-         x-transition:enter-end="opacity-100 translate-y-0"
-         x-transition:leave="transition ease-in duration-200"
-         x-transition:leave-start="opacity-100 translate-y-0"
-         x-transition:leave-end="opacity-0 translate-y-2"
-         class="fixed bottom-4 right-4 z-50">
-        <div class="rounded-lg shadow-lg p-4 max-w-sm"
-             :class="{
-                'bg-green-500 text-white': notification.type === 'success',
-                'bg-red-500 text-white': notification.type === 'error',
-                'bg-blue-500 text-white': notification.type === 'info',
-             }">
-            <div class="flex items-center">
-                <span x-text="notification.message"></span>
-                <button @click="notification.show = false" class="ml-4 text-white hover:text-gray-200">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                    </svg>
-                </button>
+    <!-- 更新进度遮罩 -->
+    <div class="overlay" x-show="progress.show" x-cloak>
+        <div class="overlay-card">
+            <h3 class="overlay-title" x-text="progress.title">正在更新</h3>
+            <p class="overlay-message" x-text="progress.message">请稍候...</p>
+            <div class="progress-track">
+                <div class="progress-bar"
+                     :class="{ indeterminate: progress.indeterminate }"
+                     :style="progress.indeterminate ? '' : ('width:' + progress.percent + '%')"></div>
+            </div>
+            <div class="meta-right" style="margin-top:0.75rem" x-show="!progress.indeterminate">
+                <span x-text="progress.percent + '%'"></span>
             </div>
         </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast"
+         x-show="notification.show"
+         x-cloak
+         :class="'toast-' + notification.type"
+         role="status">
+        <div class="toast-body" x-text="notification.message"></div>
+        <button type="button" class="toast-close" @click="notification.show = false" aria-label="关闭">✕</button>
     </div>
 </div>
 {% endblock %}
@@ -162,101 +157,205 @@ function packageList() {
         up_to_date: 0,
         update_available: 0,
         not_installed: 0,
+        errors: 0,
         checked_at: '-',
+        loading: true,
         checking: false,
         upgrading: false,
         upgradingPackages: [],
+        currentUpgrade: null,
+        progress: {
+            show: false,
+            title: '',
+            message: '',
+            percent: 0,
+            indeterminate: true,
+        },
         notification: {
             show: false,
             type: 'info',
             message: '',
         },
+        _toastTimer: null,
 
         async init() {
-            await this.fetchPackages();
+            // 先快速加载本地列表，再检查 GitHub，避免首屏“卡住无响应”
+            try {
+                const local = await api.get('/packages/api/list');
+                if (local.packages && local.packages.length) {
+                    this.packages = local.packages;
+                    this.total = local.packages.length;
+                    this.not_installed = local.packages.filter(p => !p.local_version).length;
+                    this.up_to_date = local.packages.length - this.not_installed;
+                    this.loading = false;
+                }
+            } catch (e) {
+                console.warn('本地列表加载失败，将直接检查更新', e);
+            }
+            await this.fetchPackages({ silent: true });
         },
 
-        async fetchPackages() {
-            try {
-                const data = await api.get('/packages/api/check');
-                this.packages = data.packages || [];
-                this.total = data.total || 0;
-                this.up_to_date = data.up_to_date || 0;
-                this.update_available = data.update_available || 0;
-                this.not_installed = data.not_installed || 0;
-                this.checked_at = data.checked_at
-                    ? new Date(data.checked_at).toLocaleString('zh-CN')
-                    : new Date().toLocaleString('zh-CN');
-            } catch (e) {
-                console.error('获取软件包列表失败:', e);
-                this.showNotification('error', '获取软件包列表失败');
-            }
+        isUpgrading(name) {
+            return this.upgradingPackages.includes(name);
         },
 
         showNotification(type, message) {
+            if (this._toastTimer) clearTimeout(this._toastTimer);
             this.notification = { show: true, type, message };
-            setTimeout(() => {
+            this._toastTimer = setTimeout(() => {
                 this.notification.show = false;
-            }, 3000);
+            }, 4500);
+        },
+
+        showProgress(title, message, percent = null) {
+            this.progress.show = true;
+            this.progress.title = title;
+            this.progress.message = message;
+            if (percent === null || percent === undefined) {
+                this.progress.indeterminate = true;
+                this.progress.percent = 0;
+            } else {
+                this.progress.indeterminate = false;
+                this.progress.percent = Math.max(0, Math.min(100, percent));
+            }
+        },
+
+        hideProgress() {
+            this.progress.show = false;
+            this.progress.indeterminate = true;
+            this.progress.percent = 0;
+        },
+
+        applyCheckResult(data) {
+            this.packages = data.packages || [];
+            this.total = data.total || 0;
+            this.up_to_date = data.up_to_date || 0;
+            this.update_available = data.update_available || 0;
+            this.not_installed = data.not_installed || 0;
+            this.errors = data.errors || 0;
+            this.checked_at = data.checked_at
+                ? new Date(data.checked_at).toLocaleString('zh-CN')
+                : new Date().toLocaleString('zh-CN');
+        },
+
+        async fetchPackages({ silent = false } = {}) {
+            if (!silent) this.checking = true;
+            this.loading = this.packages.length === 0;
+            try {
+                const data = await api.get('/packages/api/check');
+                this.applyCheckResult(data);
+            } catch (e) {
+                console.error('获取软件包列表失败:', e);
+                this.showNotification('error', e.message || '获取软件包列表失败');
+                throw e;
+            } finally {
+                this.loading = false;
+                if (!silent) this.checking = false;
+            }
         },
 
         async checkUpdates() {
-            this.checking = true;
             try {
-                await this.fetchPackages();
+                this.checking = true;
+                this.showProgress('检查更新', '正在向 GitHub 查询最新版本...');
+                await this.fetchPackages({ silent: true });
                 this.showNotification('success', '已刷新软件包列表');
             } catch (e) {
-                this.showNotification('error', '刷新失败');
+                this.showNotification('error', e.message || '刷新失败');
             } finally {
                 this.checking = false;
+                this.hideProgress();
             }
         },
 
-        async upgrade(name) {
-            this.upgradingPackages.push(name);
-            try {
-                const response = await fetch(`/updates/api/upgrade/${name}`, {
-                    method: 'POST',
-                });
-                const result = await response.json();
-                
-                if (response.ok && result.success) {
-                    this.showNotification('success', `${name} 更新成功`);
-                    await this.fetchPackages();
-                } else {
-                    this.showNotification('error', result.message || '更新失败');
+        upgrade(pkg) {
+            const name = typeof pkg === 'string' ? pkg : pkg.name;
+            const display = typeof pkg === 'string' ? pkg : (pkg.display_name || pkg.name);
+
+            if (this.upgrading || this.isUpgrading(name)) return;
+
+            this.upgrading = true;
+            this.currentUpgrade = name;
+            this.upgradingPackages = [...this.upgradingPackages, name];
+            this.showProgress(`更新 ${display}`, '正在连接...', null);
+
+            const finish = async (ok, message) => {
+                this.upgradingPackages = this.upgradingPackages.filter((n) => n !== name);
+                this.currentUpgrade = null;
+                this.upgrading = this.upgradingPackages.length > 0;
+                this.hideProgress();
+                this.showNotification(ok ? 'success' : 'error', message);
+                if (ok) {
+                    try {
+                        await this.fetchPackages({ silent: true });
+                    } catch (e) {
+                        /* 列表刷新失败不影响主结果 */
+                    }
                 }
-            } catch (e) {
-                this.showNotification('error', '网络错误');
-            } finally {
-                this.upgradingPackages = this.upgradingPackages.filter(n => n !== name);
-            }
+            };
+
+            const ws = new UpgradeWebSocket(name, {
+                onChecking: (data) => {
+                    this.showProgress(`更新 ${display}`, data.message || '正在获取版本信息...', null);
+                },
+                onDownloading: (data) => {
+                    const p = typeof data.progress === 'number' ? data.progress : null;
+                    this.showProgress(
+                        `更新 ${display}`,
+                        data.message || '正在下载...',
+                        p
+                    );
+                },
+                onInstalling: (data) => {
+                    this.showProgress(`更新 ${display}`, data.message || '正在安装（需要 sudo）...', 100);
+                },
+                onCompleted: (data) => {
+                    finish(true, data.message || `${display} 更新成功`);
+                },
+                onError: (data) => {
+                    finish(false, (data && data.message) || `${display} 更新失败`);
+                },
+            });
+            ws.connect();
         },
 
         async upgradeAll() {
-            if (!confirm('确定要更新所有软件包吗？')) return;
-            
+            if (this.update_available === 0) {
+                this.showNotification('info', '当前没有可更新的软件包');
+                return;
+            }
+            if (!confirm(`确定要更新 ${this.update_available} 个软件包吗？这可能需要几分钟。`)) {
+                return;
+            }
+
             this.upgrading = true;
+            this.showProgress('批量更新', '正在更新所有可升级软件包，请耐心等待...', null);
+
             try {
-                const response = await fetch('/updates/api/upgrade-all', {
-                    method: 'POST',
-                });
-                const results = await response.json();
-                
-                const successCount = results.filter(r => r.success).length;
-                const failCount = results.filter(r => !r.success).length;
-                
+                const results = await api.post('/updates/api/upgrade-all', null, true);
+                const list = Array.isArray(results) ? results : [];
+                const successCount = list.filter((r) => r.success).length;
+                const failCount = list.filter((r) => !r.success).length;
+                const failed = list.filter((r) => !r.success);
+
                 if (failCount === 0) {
-                    this.showNotification('success', `成功更新 ${successCount} 个软件包`);
+                    this.showNotification('success', `成功处理 ${successCount} 个软件包`);
                 } else {
-                    this.showNotification('info', `更新完成: ${successCount} 成功, ${failCount} 失败`);
+                    const detail = failed
+                        .slice(0, 3)
+                        .map((r) => `${r.package_name}: ${r.message}`)
+                        .join('；');
+                    this.showNotification(
+                        'info',
+                        `完成: ${successCount} 成功, ${failCount} 失败。${detail}`
+                    );
                 }
-                
-                await this.fetchPackages();
+                await this.fetchPackages({ silent: true });
             } catch (e) {
-                this.showNotification('error', '网络错误');
+                this.showNotification('error', e.message || '批量更新失败');
             } finally {
                 this.upgrading = false;
+                this.hideProgress();
             }
         },
     };
