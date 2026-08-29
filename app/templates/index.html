@@ -97,11 +97,19 @@
                                     class="btn btn-primary btn-sm"
                                     x-show="pkg.status === 'update_available' || pkg.status === 'not_installed'"
                                     @click="upgrade(pkg)"
-                                    :disabled="upgrading || checking || isUpgrading(pkg.name)">
+                                    :disabled="upgrading || checking || uninstalling || isUpgrading(pkg.name)">
                                 <span class="spinner" x-show="isUpgrading(pkg.name)"></span>
                                 <span x-text="isUpgrading(pkg.name) ? '更新中' : (pkg.status === 'not_installed' ? '安装' : '更新')"></span>
                             </button>
-                            <span x-show="pkg.status !== 'update_available' && pkg.status !== 'not_installed'"
+                            <button type="button"
+                                    class="btn btn-danger btn-sm"
+                                    x-show="pkg.local_version"
+                                    @click="uninstall(pkg)"
+                                    :disabled="upgrading || checking || uninstalling">
+                                <span class="spinner" x-show="isUninstalling(pkg.name)"></span>
+                                <span x-text="isUninstalling(pkg.name) ? '卸载中' : '卸载'"></span>
+                            </button>
+                            <span x-show="!pkg.local_version && pkg.status !== 'update_available' && pkg.status !== 'not_installed'"
                                   style="color:var(--gray-400)">-</span>
                         </td>
                     </tr>
@@ -162,8 +170,10 @@ function packageList() {
         loading: true,
         checking: false,
         upgrading: false,
+        uninstalling: false,
         upgradingPackages: [],
         currentUpgrade: null,
+        currentUninstall: null,
         progress: {
             show: false,
             title: '',
@@ -197,6 +207,10 @@ function packageList() {
 
         isUpgrading(name) {
             return this.upgradingPackages.includes(name);
+        },
+
+        isUninstalling(name) {
+            return this.currentUninstall === name;
         },
 
         showNotification(type, message) {
@@ -319,6 +333,34 @@ function packageList() {
             ws.connect();
         },
 
+        async uninstall(pkg) {
+            if (this.upgrading || this.checking || this.uninstalling) return;
+
+            const display = pkg.display_name || pkg.name;
+            if (!confirm(`确定要卸载“${display}”吗？这会移除软件，但保留其配置文件和本工具中的管理条目。`)) {
+                return;
+            }
+
+            this.uninstalling = true;
+            this.currentUninstall = pkg.name;
+            this.showProgress(`卸载 ${display}`, '正在卸载软件包...', null);
+
+            try {
+                const result = await api.post(`/packages/api/${encodeURIComponent(pkg.name)}/uninstall`);
+                if (!result.success) {
+                    throw new Error(result.message || `${display} 卸载失败`);
+                }
+                this.showNotification('success', result.message || `${display} 卸载成功`);
+                await this.fetchPackages({ silent: true });
+            } catch (e) {
+                this.showNotification('error', e.message || `${display} 卸载失败`);
+            } finally {
+                this.uninstalling = false;
+                this.currentUninstall = null;
+                this.hideProgress();
+            }
+        },
+
         async upgradeAll() {
             if (this.update_available === 0) {
                 this.showNotification('info', '当前没有可更新的软件包');
@@ -328,6 +370,7 @@ function packageList() {
                 return;
             }
 
+            if (this.uninstalling) return;
             this.upgrading = true;
             this.showProgress('批量更新', '正在更新所有可升级软件包，请耐心等待...', null);
 

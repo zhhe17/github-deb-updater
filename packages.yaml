@@ -11,12 +11,6 @@ packages:
   post_install: ''
   pre_install: ''
   repo: farion1231/cc-switch
-- asset_pattern: Cockpit.Tools_*_amd64.deb
-  display_name: Cockpit Tools
-  name: cockpit-tools
-  post_install: ''
-  pre_install: ''
-  repo: jlcodes99/cockpit-tools
 - asset_pattern: LocalSend-*-linux-x86-64.deb
   display_name: LocalSend
   name: localsend
@@ -41,3 +35,9 @@ packages:
   post_install: ''
   pre_install: ''
   repo: marktext/marktext
+- asset_pattern: PiliPlus_linux_*_amd64.deb
+  display_name: PiliPlus
+  name: piliplus
+  post_install: ''
+  pre_install: ''
+  repo: bggRGjQaUbCoE/PiliPlus

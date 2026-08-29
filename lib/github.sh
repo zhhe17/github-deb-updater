@@ -105,13 +105,14 @@ github_get_latest_release_tag() {
     esac
 }
 
-# 获取匹配 asset_pattern 的下载 URL
-github_get_asset_url() {
+# 获取最新且包含匹配资产的正式 Release
+# 输出: "version|download_url"
+github_get_latest_compatible_release() {
     local repo="$1"
     local asset_pattern="$2"
-    local url="${GITHUB_API_BASE}/repos/${repo}/releases/latest"
+    local url="${GITHUB_API_BASE}/repos/${repo}/releases?per_page=20"
 
-    log_debug "获取 $repo 的资产下载 URL，匹配模式: $asset_pattern"
+    log_debug "获取 $repo 的兼容 Release，匹配模式: $asset_pattern"
 
     local result
     result=$(_github_api_request "$url")
@@ -135,31 +136,46 @@ github_get_asset_url() {
             ;;
     esac
 
-    local asset_name=""
-    local download_url=""
+    local compatible_release
+    compatible_release=$(python3 -c '
+import fnmatch
+import json
+import sys
 
-    local found=false
-    while IFS= read -r line; do
-        if [[ "$line" =~ \"name\":\ *\"([^\"]+)\" ]]; then
-            local name="${BASH_REMATCH[1]}"
-            if [[ "$name" == $asset_pattern ]]; then
-                asset_name="$name"
-                found=true
-            fi
-        fi
+pattern = sys.argv[1]
+try:
+    releases = json.load(sys.stdin)
+except (json.JSONDecodeError, TypeError):
+    sys.exit(2)
 
-        if [[ "$found" == true && "$line" =~ \"browser_download_url\":\ *\"([^\"]+)\" ]]; then
-            download_url="${BASH_REMATCH[1]}"
-            break
-        fi
-    done <<< "$response"
+for release in releases:
+    if release.get("draft") or release.get("prerelease"):
+        continue
+    for asset in release.get("assets", []):
+        if fnmatch.fnmatchcase(asset.get("name", ""), pattern):
+            tag = release.get("tag_name", "")
+            version = tag[1:] if tag.startswith("v") else tag
+            url = asset.get("browser_download_url", "")
+            if version and url:
+                print(f"{version}|{url}")
+                sys.exit(0)
+sys.exit(1)
+' "$asset_pattern" <<< "$response") || true
 
-    if [[ -z "$download_url" ]]; then
-        log_warn "在 $repo 的最新 Release 中未找到匹配 '$asset_pattern' 的资产"
+    if [[ -z "$compatible_release" ]]; then
+        log_warn "在 $repo 最近的正式 Release 中未找到匹配 '$asset_pattern' 的资产"
         return 1
     fi
 
-    log_debug "找到匹配资产: $asset_name -> $download_url"
-    echo "$download_url"
-    return 0
+    log_debug "找到兼容 Release: ${compatible_release%%|*}"
+    echo "$compatible_release"
+}
+
+# 获取匹配 asset_pattern 的下载 URL
+github_get_asset_url() {
+    local repo="$1"
+    local asset_pattern="$2"
+    local compatible_release
+    compatible_release=$(github_get_latest_compatible_release "$repo" "$asset_pattern") || return 1
+    echo "${compatible_release#*|}"
 }

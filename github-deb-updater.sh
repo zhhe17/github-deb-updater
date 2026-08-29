@@ -239,9 +239,10 @@ cmd_update() {
             log_info "  未安装"
         fi
         
-        # 获取最新版本
-        local latest_version
-        latest_version=$(github_get_latest_release_tag "$repo") || true
+        # 获取最新且包含所需 deb 资产的版本
+        local compatible_release latest_version
+        compatible_release=$(github_get_latest_compatible_release "$repo" "$asset_pattern") || true
+        latest_version="${compatible_release%%|*}"
         
         if [[ -z "$latest_version" ]]; then
             log_error "  无法获取最新版本"
@@ -308,9 +309,11 @@ cmd_upgrade() {
         local local_version
         local_version=$(get_installed_version "$name")
         
-        # 获取最新版本
-        local latest_version
-        latest_version=$(github_get_latest_release_tag "$repo") || true
+        # 版本和下载 URL 必须来自同一个兼容 Release
+        local compatible_release latest_version download_url
+        compatible_release=$(github_get_latest_compatible_release "$repo" "$asset_pattern") || true
+        latest_version="${compatible_release%%|*}"
+        download_url="${compatible_release#*|}"
         
         if [[ -z "$latest_version" ]]; then
             log_error "无法获取 $display_name 的最新版本"
@@ -354,11 +357,7 @@ cmd_upgrade() {
             fi
         fi
         
-        # 获取下载 URL
-        local download_url
-        download_url=$(github_get_asset_url "$repo" "$asset_pattern")
-        
-        if [[ $? -ne 0 ]] || [[ -z "$download_url" ]]; then
+        if [[ -z "$download_url" ]] || [[ "$download_url" == "$compatible_release" ]]; then
             log_error "无法获取 $display_name 的下载链接"
             failed=$((failed + 1))
             failed_list+=("$display_name: 无法获取下载链接")

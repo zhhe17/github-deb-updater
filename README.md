@@ -121,11 +121,6 @@ packages:
     repo: "farion1231/cc-switch"
     asset_pattern: "CC-Switch-v*-Linux-x86_64.deb"
 
-  - name: "cockpit-tools"
-    display_name: "Cockpit Tools"
-    repo: "jlcodes99/cockpit-tools"
-    asset_pattern: "Cockpit.Tools_*_amd64.deb"
-
   - name: "localsend"
     display_name: "LocalSend"
     repo: "localsend/localsend"

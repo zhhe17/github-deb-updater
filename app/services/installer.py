@@ -218,6 +218,49 @@ async def install_deb(
     )
 
 
+async def uninstall_package(package_name: str) -> UpdateResult:
+    """卸载已安装的软件包，但保留其配置文件和管理条目。"""
+    try:
+        # 不使用 autoremove，避免自动移除用户仍可能需要的依赖。
+        if os.geteuid() == 0:
+            uninstall_args = ["apt-get", "remove", "-y", package_name]
+        else:
+            uninstall_args = ["sudo", "-n", "apt-get", "remove", "-y", package_name]
+
+        result = await asyncio.to_thread(_run_cmd, uninstall_args, 180)
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or "").strip()
+            if "password" in err.lower() or "a password is required" in err.lower():
+                err = (
+                    "需要 root 权限卸载软件包。"
+                    "请用 root 启动 Web 服务，或配置免密 sudo。"
+                    f" 原始错误: {err}"
+                )
+            return UpdateResult(
+                success=False,
+                message=f"卸载失败: {err or '未知错误'}",
+                package_name=package_name,
+            )
+    except subprocess.TimeoutExpired:
+        return UpdateResult(
+            success=False,
+            message="卸载超时",
+            package_name=package_name,
+        )
+    except FileNotFoundError as e:
+        return UpdateResult(
+            success=False,
+            message=f"命令不存在: {e}",
+            package_name=package_name,
+        )
+
+    return UpdateResult(
+        success=True,
+        message="卸载成功（已保留配置文件和软件包管理条目）",
+        package_name=package_name,
+    )
+
+
 def cleanup_cache(max_age_days: int = 7):
     """清理旧缓存文件"""
     cache_dir = config.cache_path

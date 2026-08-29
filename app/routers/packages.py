@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import config
 from app.models import PackageInfo, PackageStatus, CheckResult
 from app.services.github import github_service
+from app.services.installer import uninstall_package
 from app.services.version import get_installed_version, is_update_needed
 
 router = APIRouter(prefix="/packages", tags=["packages"])
@@ -107,6 +108,20 @@ async def api_check_updates():
         packages=packages,
         checked_at=datetime.now(),
     )
+
+
+@router.post("/api/{name}/uninstall")
+async def api_uninstall_package(name: str):
+    """卸载一个受本工具管理的已安装软件包。"""
+    pkg = config.get_package(name)
+    if not pkg:
+        raise HTTPException(status_code=404, detail=f"软件包 {name} 不存在")
+
+    installed_version = await asyncio.to_thread(get_installed_version, pkg.name)
+    if installed_version is None:
+        raise HTTPException(status_code=409, detail=f"软件包 {pkg.display_name} 未安装")
+
+    return await uninstall_package(pkg.name)
 
 
 @router.post("/api/add")

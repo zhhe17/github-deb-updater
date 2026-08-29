@@ -1,6 +1,7 @@
 """GitHub API 交互服务"""
 
 import asyncio
+import fnmatch
 import os
 from typing import Optional
 
@@ -135,17 +136,39 @@ class GitHubService:
         Returns:
             str: 下载 URL，未找到返回 None
         """
-        release = await self.get_latest_release(repo)
-        if not release:
-            return None
+        _, url = await self.get_version_and_url(repo, asset_pattern)
+        return url
 
-        import fnmatch
+    @staticmethod
+    def _version_from_tag(tag: str) -> str:
+        """将常见 Release 标签转换为可比较的版本号。"""
+        if tag.startswith("v") and not tag.startswith("v-"):
+            return tag[1:]
+        if "-" in tag:
+            last = tag.rsplit("-", 1)[-1]
+            if last and (
+                last[0].isdigit()
+                or (last.startswith("v") and len(last) > 1 and last[1].isdigit())
+            ):
+                return last[1:] if last.startswith("v") else last
+        return tag
 
-        for asset in release["assets"]:
-            if fnmatch.fnmatch(asset["name"], asset_pattern):
-                return asset["url"]
-
-        return None
+    @staticmethod
+    def _find_compatible_release(
+        releases: list[dict], asset_pattern: str
+    ) -> tuple[Optional[str], Optional[str]]:
+        """在按时间倒序的 Release 中找到最新兼容资产。"""
+        for release in releases:
+            if release.get("draft") or release.get("prerelease"):
+                continue
+            for asset in release.get("assets", []):
+                if fnmatch.fnmatchcase(asset.get("name", ""), asset_pattern):
+                    tag = release.get("tag_name", "")
+                    version = GitHubService._version_from_tag(tag)
+                    url = asset.get("browser_download_url", "")
+                    if version and url:
+                        return version, url
+        return None, None
 
     async def get_version_and_url(
         self, repo: str, asset_pattern: str
@@ -155,36 +178,11 @@ class GitHubService:
         Returns:
             tuple: (version, download_url)
         """
-        release = await self.get_latest_release(repo)
-        if not release:
+        url = f"{GITHUB_API_BASE}/repos/{repo}/releases?per_page=20"
+        releases = await self._request_with_retry(url)
+        if not isinstance(releases, list):
             return None, None
-
-        # 从 tag_name 提取版本号（去掉常见前缀如 v、desktop-v 等）
-        tag = release["tag_name"]
-        version = tag
-        # 去除最后一个 '-' 之前的所有前缀（如 desktop-v1.6.0 -> 1.6.0）
-        # 先尝试去掉 'v' 前缀
-        if version.startswith("v") and not version.startswith("v-"):
-            version = version[1:]
-        # 如果仍包含 '-' 且不是纯版本号，去掉前缀部分
-        elif "-" in version:
-            parts = version.split("-")
-            last = parts[-1]
-            # 如果最后一段以数字开头，视为版本号
-            # 也可能最后一段是 v1.6.0 这种格式，再去掉 v 前缀
-            if last and (last[0].isdigit() or (last.startswith("v") and len(last) > 1 and last[1].isdigit())):
-                version = last[1:] if last.startswith("v") else last
-
-        # 查找匹配的资产
-        import fnmatch
-
-        download_url = None
-        for asset in release["assets"]:
-            if fnmatch.fnmatch(asset["name"], asset_pattern):
-                download_url = asset["url"]
-                break
-
-        return version, download_url
+        return self._find_compatible_release(releases, asset_pattern)
 
 
 # 全局服务实例

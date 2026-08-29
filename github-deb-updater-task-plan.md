@@ -54,11 +54,6 @@ packages:
     pre_install: ""                                   # 安装前执行的命令（可选）
     post_install: ""                                  # 安装后执行的命令（可选）
 
-  - name: "cockpit"
-    display_name: "Cockpit Tools"
-    repo: "jlcodes99/cockpit-tools"
-    asset_pattern: "Cockpit.Tools_*_amd64.deb"
-
   - name: "clash"
     display_name: "Clash Verge"
     repo: "clash-verge-rev/clash-verge-rev"

@@ -234,6 +234,15 @@ main.container {
     background: var(--primary-hover);
 }
 
+.btn-danger {
+    background: var(--danger);
+    color: var(--white);
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: #dc2626;
+}
+
 .btn-secondary {
     border-color: var(--gray-300);
     background: var(--white);
