@@ -85,6 +85,16 @@ sudo systemctl start github-deb-updater
 - **设置管理**：在界面上配置 Token 和添加软件包
 - **API 文档**：自动生成的 API 文档（/docs）
 
+### 版本与 Release 标签
+
+Release 标签只用于找到匹配的 deb 资产，不参与更新大小判断。程序会读取候选 deb 内部的 `Package`、`Version` 和 `Architecture`，首页“最新版本”展示其中的 `Version`，再使用 `dpkg --compare-versions` 与本地 dpkg 版本比较。
+
+因此不同软件无需各自维护比较器，epoch、`+build`、Debian revision、四段版本和 `~` 预发布版本都遵循同一套 Debian 规则。例如 PiliPlus 的 Release `2.1.2.3` 可以对应 deb `2.1.2+5281`，二者不会再被直接比较。
+
+版本格式非法、dpkg 比较失败、本地版本查询失败或安装状态异常时，会报告错误，不再按“已是最新”或“未安装”处理。
+
+Web 与 CLI 会将已验证的候选包名、版本和架构保存到缓存目录的 `metadata/` 中。缓存按仓库、资产 ID、大小、更新时间和下载 URL 区分；重复检查仅需获取 GitHub 资产信息，资产未变时无需重新下载 deb。清理旧 deb 不会删除这些元数据。缓存损坏或资产变化会触发重新读取，安装前仍需取得并校验实际 deb 文件；CLI 的 `--no-cache` 会绕过元数据缓存。
+
 ### 界面截图
 
 ![软件包列表](docs/images/package-list.png)

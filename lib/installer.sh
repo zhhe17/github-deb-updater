@@ -5,12 +5,65 @@
 # 缓存目录（由主脚本设置）
 CACHE_DIR="${CACHE_DIR:-cache}"
 
+# 仅检查时可复用元数据；安装路径总是重新下载/校验。
+get_candidate_version() {
+    local repo="$1" name="$2" url="$3" asset_id="$4" size="$5" updated="$6" mode="${7:-check}"
+    local helper="${SCRIPT_DIR}/app/services/metadata_cache.py"
+    local key architecture version deb_path internal_architecture
+    key=$(python3 "$helper" key "$repo" "$asset_id" "$size" "$updated" "$url") || return 1
+    architecture=$(dpkg --print-architecture) || return 1
+    [[ -n "$architecture" ]] || return 1
+    if [[ "$mode" == check && "${NO_CACHE:-false}" != true ]]; then
+        if version=$(python3 "$helper" read "$CACHE_DIR" "$key" "$name" "$architecture") && validate_version "$version"; then
+            printf '%s\n' "$version"
+            return 0
+        fi
+    fi
+    if [[ "${NO_CACHE:-false}" == true ]]; then
+        rm -f "${CACHE_DIR}/${name}_${key}.deb"
+    fi
+    deb_path=$(download_deb "$url" "$name" "$key") || return 1
+    if [[ "$size" -gt 0 && "$(stat -c %s "$deb_path")" != "$size" ]]; then
+        log_error "deb 文件大小与 GitHub 资产不符"
+        rm -f "$deb_path"
+        return 1
+    fi
+    version=$(get_deb_package_version "$deb_path" "$name") || return 1
+    validate_version "$version" || return 1
+    internal_architecture=$(dpkg-deb -f "$deb_path" Architecture) || return 1
+    if [[ "$internal_architecture" != "$architecture" && "$internal_architecture" != all ]]; then
+        log_error "deb 架构与当前系统不匹配"
+        return 1
+    fi
+    python3 "$helper" write "$CACHE_DIR" "$key" "$name" "$internal_architecture" "$version" || return 1
+    if [[ "$mode" == install ]]; then
+        printf '%s|%s\n' "$version" "$deb_path"
+    else
+        printf '%s\n' "$version"
+    fi
+}
+
+# 读取候选 deb 的真实版本，并确认内部包名与配置一致。
+get_deb_package_version() {
+    local deb_path="$1"
+    local expected_package="$2"
+    local internal_package internal_version
+    internal_package=$(dpkg-deb -f "$deb_path" Package 2>/dev/null) || return 1
+    internal_version=$(dpkg-deb -f "$deb_path" Version 2>/dev/null) || return 1
+    if [[ "$internal_package" != "$expected_package" || -z "$internal_version" ]]; then
+        log_error "deb 内部包名 '$internal_package' 与配置 '$expected_package' 不一致"
+        return 1
+    fi
+    printf '%s\n' "$internal_version"
+}
+
 # 下载 deb 包
 download_deb() {
     local url="$1"
     local package_name="$2"
     local version="$3"
-    local target_path="${CACHE_DIR}/${package_name}_${version}.deb"
+    local safe_version="${version//\//_}"
+    local target_path="${CACHE_DIR}/${package_name}_${safe_version}.deb"
     
     # 确保缓存目录存在
     mkdir -p "$CACHE_DIR" 2>/dev/null

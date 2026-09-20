@@ -154,10 +154,10 @@ cmd_list() {
         total=$((total + 1))
 
         local local_version
-        local_version=$(get_installed_version "$name")
-
         local line
-        if [[ -n "$local_version" ]]; then
+        if ! local_version=$(get_installed_version "$name"); then
+            line="  [错误]  $display_name  无法读取本地版本  仓库: $repo"
+        elif [[ -n "$local_version" ]]; then
             installed=$((installed + 1))
             line="  [OK]  $display_name  本地版本: $local_version  仓库: $repo"
         else
@@ -231,7 +231,10 @@ cmd_update() {
         
         # 获取本地版本
         local local_version
-        local_version=$(get_installed_version "$name")
+        if ! local_version=$(get_installed_version "$name"); then
+            errors=$((errors + 1))
+            continue
+        fi
         
         if [[ -n "$local_version" ]]; then
             log_info "  本地版本: $local_version"
@@ -239,26 +242,35 @@ cmd_update() {
             log_info "  未安装"
         fi
         
-        # 获取最新且包含所需 deb 资产的版本
-        local compatible_release latest_version
-        compatible_release=$(github_get_latest_compatible_release "$repo" "$asset_pattern") || true
-        latest_version="${compatible_release%%|*}"
-        
-        if [[ -z "$latest_version" ]]; then
+        # 标签只定位资产；比较必须使用 deb 内部 Version。
+        local compatible_release release_version download_url latest_version asset_id asset_size asset_updated
+        compatible_release=$(github_get_latest_compatible_release "$repo" "$asset_pattern" metadata) || true
+        IFS='|' read -r release_version download_url asset_id asset_size asset_updated <<< "$compatible_release"
+        if [[ -z "$release_version" || -z "$download_url" || "$download_url" == "$compatible_release" ]]; then
             log_error "  无法获取最新版本"
             errors=$((errors + 1))
             continue
         fi
-        
-        log_info "  最新版本: $latest_version"
+        latest_version=$(get_candidate_version "$repo" "$name" "$download_url" "$asset_id" "$asset_size" "$asset_updated") || true
+        if [[ -z "$latest_version" ]]; then
+            log_error "  无法读取候选 deb 的内部版本"
+            errors=$((errors + 1))
+            continue
+        fi
+        log_info "  候选版本: $latest_version (Release: $release_version)"
         
         # 判断是否需要更新
         if is_update_needed "$local_version" "$latest_version"; then
             log_warn "  ⬆ 有新版本可用: ${local_version:-"未安装"} -> $latest_version"
             update_available=$((update_available + 1))
         else
-            log_success "  ✓ 已是最新版本"
-            up_to_date=$((up_to_date + 1))
+            if [[ $? -eq 2 ]]; then
+                log_error "  无法比较版本"
+                errors=$((errors + 1))
+            else
+                log_success "  ✓ 已是最新版本"
+                up_to_date=$((up_to_date + 1))
+            fi
         fi
         
         echo ""
@@ -307,23 +319,40 @@ cmd_upgrade() {
         
         # 获取本地版本
         local local_version
-        local_version=$(get_installed_version "$name")
+        if ! local_version=$(get_installed_version "$name"); then
+            failed=$((failed + 1))
+            failed_list+=("$display_name: 无法读取本地版本")
+            continue
+        fi
         
-        # 版本和下载 URL 必须来自同一个兼容 Release
-        local compatible_release latest_version download_url
-        compatible_release=$(github_get_latest_compatible_release "$repo" "$asset_pattern") || true
-        latest_version="${compatible_release%%|*}"
-        download_url="${compatible_release#*|}"
-        
-        if [[ -z "$latest_version" ]]; then
+        # 版本和 URL 来自同一资产，更新判断使用 deb 内部 Version。
+        local compatible_release release_version latest_version download_url deb_path asset_id asset_size asset_updated
+        compatible_release=$(github_get_latest_compatible_release "$repo" "$asset_pattern" metadata) || true
+        IFS='|' read -r release_version download_url asset_id asset_size asset_updated <<< "$compatible_release"
+        if [[ -z "$release_version" || -z "$download_url" || "$download_url" == "$compatible_release" ]]; then
             log_error "无法获取 $display_name 的最新版本"
             failed=$((failed + 1))
             failed_list+=("$display_name: 无法获取最新版本")
             continue
         fi
+
+        latest_version=$(get_candidate_version "$repo" "$name" "$download_url" "$asset_id" "$asset_size" "$asset_updated") || true
+        if [[ -z "$latest_version" ]]; then
+            log_error "无法读取 $display_name 候选 deb 的内部版本"
+            failed=$((failed + 1))
+            failed_list+=("$display_name: deb 元数据无效或包名不匹配")
+            continue
+        fi
         
         # 判断是否需要更新
-        if ! is_update_needed "$local_version" "$latest_version"; then
+        local comparison_result=0
+        is_update_needed "$local_version" "$latest_version" || comparison_result=$?
+        if [[ $comparison_result -eq 2 ]]; then
+            log_error "$display_name 无法比较版本"
+            failed=$((failed + 1))
+            failed_list+=("$display_name: 无法比较版本")
+            continue
+        elif [[ $comparison_result -eq 1 ]]; then
             log_success "$display_name 已是最新版本 ($local_version)"
             skipped=$((skipped + 1))
             skipped_list+=("$display_name: $local_version (已是最新)")
@@ -357,34 +386,31 @@ cmd_upgrade() {
             fi
         fi
         
-        if [[ -z "$download_url" ]] || [[ "$download_url" == "$compatible_release" ]]; then
-            log_error "无法获取 $display_name 的下载链接"
-            failed=$((failed + 1))
-            failed_list+=("$display_name: 无法获取下载链接")
-            continue
-        fi
-        
-        # 如果指定了 --no-cache，清除缓存
-        if [[ "$NO_CACHE" == true ]]; then
-            rm -f "${CACHE_DIR}/${name}_${latest_version}.deb"
-        fi
-        
-        # 下载 deb 包
-        local deb_path
-        deb_path=$(download_deb "$download_url" "$name" "$latest_version")
-        
-        if [[ $? -ne 0 ]] || [[ -z "$deb_path" ]]; then
-            log_error "$display_name 下载失败"
-            failed=$((failed + 1))
-            failed_list+=("$display_name: 下载失败")
-            continue
-        fi
-        
         # 安装 deb 包
+        local verified_candidate verified_version
+        if ! verified_candidate=$(get_candidate_version "$repo" "$name" "$download_url" "$asset_id" "$asset_size" "$asset_updated" install); then
+            failed=$((failed + 1))
+            failed_list+=("$display_name: 安装前候选包校验失败")
+            continue
+        fi
+        IFS='|' read -r verified_version deb_path <<< "$verified_candidate"
+        if ! version_compare "$verified_version" "$latest_version"; then
+            log_error "$display_name 安装包版本与检查结果不一致"
+            failed=$((failed + 1))
+            failed_list+=("$display_name: 安装包版本与检查结果不一致")
+            continue
+        fi
         if install_deb "$deb_path" "$pre_install" "$post_install"; then
-            log_success "$display_name 更新完成 ($latest_version)"
-            updated=$((updated + 1))
-            updated_list+=("$display_name: ${local_version:-"未安装"} -> $latest_version")
+            local installed_after
+            if installed_after=$(get_installed_version "$name") && [[ -n "$installed_after" ]] && version_compare "$installed_after" "$latest_version"; then
+                log_success "$display_name 更新完成并通过版本复核 ($installed_after)"
+                updated=$((updated + 1))
+                updated_list+=("$display_name: ${local_version:-"未安装"} -> $installed_after")
+            else
+                log_error "$display_name 安装命令完成，但版本复核失败（期望 $latest_version，实际 ${installed_after:-未安装}）"
+                failed=$((failed + 1))
+                failed_list+=("$display_name: 安装后版本复核失败")
+            fi
         else
             log_error "$display_name 安装失败"
             failed=$((failed + 1))

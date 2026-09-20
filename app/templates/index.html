@@ -76,7 +76,12 @@
                     <tr>
                         <td>
                             <div class="pkg-name" x-text="pkg.display_name"></div>
-                            <div class="pkg-repo" x-text="pkg.repo"></div>
+                            <a class="pkg-repo"
+                               :href="getReleasesUrl(pkg)"
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               :title="'前往 ' + (pkg.display_name || pkg.name) + ' 的 GitHub Releases 下载页'"
+                               x-text="pkg.repo"></a>
                         </td>
                         <td x-text="pkg.local_version || '-'"></td>
                         <td x-text="pkg.latest_version || '-'"></td>
@@ -211,6 +216,15 @@ function packageList() {
 
         isUninstalling(name) {
             return this.currentUninstall === name;
+        },
+
+        getReleasesUrl(pkg) {
+            if (!pkg || !pkg.repo) return '#';
+            const repo = pkg.repo.trim();
+            if (repo.startsWith('http://') || repo.startsWith('https://')) {
+                return repo.endsWith('/releases') ? repo : repo.replace(/\/+$/, '') + '/releases';
+            }
+            return 'https://github.com/' + repo.replace(/^\/+/, '').replace(/\/+$/, '') + '/releases';
         },
 
         showNotification(type, message) {

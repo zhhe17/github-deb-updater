@@ -9,10 +9,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import config
-from app.models import PackageInfo, PackageStatus, CheckResult
+from app.models import CheckResult, PackageInfo, PackageStatus
+from app.services.candidates import CandidateError, get_candidate_package
 from app.services.github import github_service
 from app.services.installer import uninstall_package
-from app.services.version import get_installed_version, is_update_needed
+from app.services.version import VersionError, get_installed_version, is_update_needed
 
 router = APIRouter(prefix="/packages", tags=["packages"])
 templates = Jinja2Templates(directory="app/templates")
@@ -28,21 +29,25 @@ async def _get_package_info(pkg) -> PackageInfo:
     )
 
     # 本地版本（同步调用，放到线程池避免阻塞）
-    info.local_version = await asyncio.to_thread(get_installed_version, pkg.name)
-
     try:
-        version, url = await github_service.get_version_and_url(pkg.repo, pkg.asset_pattern)
-        info.latest_version = version
-
-        if version is None:
+        info.local_version = await asyncio.to_thread(get_installed_version, pkg.name)
+        release = await github_service.get_release_info(pkg.repo, pkg.asset_pattern)
+        if release is None:
             info.status = PackageStatus.ERROR
-            info.error_message = "无法获取最新版本（网络/API 限制/仓库不存在）"
-        elif info.local_version is None:
+            info.error_message = "无法获取包含匹配 deb 的正式 Release"
+            return info
+        candidate = await get_candidate_package(pkg, release, require_file=False)
+        info.latest_version = candidate.deb_version
+
+        if info.local_version is None:
             info.status = PackageStatus.NOT_INSTALLED
-        elif is_update_needed(info.local_version, version):
+        elif is_update_needed(info.local_version, candidate.deb_version):
             info.status = PackageStatus.UPDATE_AVAILABLE
         else:
             info.status = PackageStatus.UP_TO_DATE
+    except CandidateError as e:
+        info.status = PackageStatus.ERROR
+        info.error_message = str(e)
     except Exception as e:
         info.status = PackageStatus.ERROR
         info.error_message = str(e)
@@ -64,7 +69,12 @@ async def api_list_packages():
     """获取软件包列表 API（仅本地配置 + 已安装版本，不请求 GitHub）"""
     packages = []
     for pkg in config.packages:
-        local = await asyncio.to_thread(get_installed_version, pkg.name)
+        error_message = None
+        try:
+            local = await asyncio.to_thread(get_installed_version, pkg.name)
+        except VersionError as error:
+            local = None
+            error_message = str(error)
         packages.append(
             {
                 "name": pkg.name,
@@ -73,8 +83,10 @@ async def api_list_packages():
                 "asset_pattern": pkg.asset_pattern,
                 "local_version": local,
                 "latest_version": None,
-                "status": "not_installed" if local is None else "up_to_date",
-                "error_message": None,
+                "status": "error"
+                if error_message
+                else ("not_installed" if local is None else "up_to_date"),
+                "error_message": error_message,
             }
         )
     return {"packages": packages}
@@ -95,7 +107,9 @@ async def api_check_updates():
 
     total = len(packages)
     up_to_date = sum(1 for p in packages if p.status == PackageStatus.UP_TO_DATE)
-    update_available = sum(1 for p in packages if p.status == PackageStatus.UPDATE_AVAILABLE)
+    update_available = sum(
+        1 for p in packages if p.status == PackageStatus.UPDATE_AVAILABLE
+    )
     not_installed = sum(1 for p in packages if p.status == PackageStatus.NOT_INSTALLED)
     errors = sum(1 for p in packages if p.status == PackageStatus.ERROR)
 
@@ -117,7 +131,10 @@ async def api_uninstall_package(name: str):
     if not pkg:
         raise HTTPException(status_code=404, detail=f"软件包 {name} 不存在")
 
-    installed_version = await asyncio.to_thread(get_installed_version, pkg.name)
+    try:
+        installed_version = await asyncio.to_thread(get_installed_version, pkg.name)
+    except VersionError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     if installed_version is None:
         raise HTTPException(status_code=409, detail=f"软件包 {pkg.display_name} 未安装")
 

@@ -1,61 +1,63 @@
-"""版本比较服务"""
+"""使用 Debian 原生语义读取和比较软件包版本。"""
 
-import re
+import os
 import subprocess
 from typing import Optional
 
-from packaging.version import Version, InvalidVersion
+
+class VersionError(RuntimeError):
+    """版本读取或比较失败，不能解释为未安装或版本相等。"""
 
 
-def get_installed_version(package_name: str) -> Optional[str]:
-    """获取已安装软件的版本号
-
-    通过 dpkg -l 查询本地已安装的包版本
-    """
+def validate_version(version: str) -> None:
     try:
         result = subprocess.run(
-            ["dpkg", "-l", package_name],
+            ["dpkg", "--validate-version", version],
             capture_output=True,
             text=True,
             timeout=10,
         )
+    except (subprocess.TimeoutExpired, OSError) as error:
+        raise VersionError("无法比较版本：无法调用 dpkg 校验版本") from error
+    if not version or result.returncode != 0:
+        raise VersionError(f"无法比较版本：非法 Debian 版本 {version!r}")
 
-        if result.returncode != 0:
-            return None
 
-        # 查找 ii 开头的行（已安装标记）
-        for line in result.stdout.splitlines():
-            if line.startswith("ii"):
-                parts = line.split()
-                if len(parts) >= 3:
-                    version = parts[2]
-                    # 去除 epoch 前缀（如 2:1.89.1 -> 1.89.1）
-                    if ":" in version:
-                        version = version.split(":", 1)[1]
-                    return version
-
+def get_installed_version(package_name: str) -> Optional[str]:
+    """返回 dpkg 中的完整版本，保留 epoch、+build 与 Debian revision。"""
+    try:
+        result = subprocess.run(
+            ["dpkg-query", "-W", "-f=${db:Status-Abbrev}|${Version}", package_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except (subprocess.TimeoutExpired, OSError) as error:
+        raise VersionError(
+            f"无法读取 {package_name} 的本地版本：dpkg-query 执行失败"
+        ) from error
+    if result.returncode == 1 and "no packages found matching" in result.stderr:
         return None
-
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    if result.returncode != 0:
+        raise VersionError(
+            f"无法读取 {package_name} 的本地版本：{result.stderr.strip()}"
+        )
+    status, separator, version = result.stdout.rstrip("\n").partition("|")
+    if not separator or len(status) != 3:
+        raise VersionError(f"无法读取 {package_name} 的本地版本：返回格式异常")
+    if status[1] in ("n", "c"):
         return None
+    if status[1:] != "i " or not version.strip():
+        raise VersionError(
+            f"无法读取 {package_name} 的本地版本：安装状态异常 ({status})"
+        )
+    return version.strip()
 
 
 def normalize_version(version: str) -> str:
-    """标准化版本号
-
-    - 去除 + 及其后的构建元数据
-    - 去除第 4 段（当恰好 4 段数字时）
-    """
-    # 去除 + 及其后的构建元数据
-    if "+" in version:
-        version = version.split("+", 1)[0]
-
-    # 去除第 4 段（当恰好 4 段数字时）
-    match = re.match(r"^(\d+\.\d+\.\d+)\.\d+$", version)
-    if match:
-        version = match.group(1)
-
-    return version
+    """兼容旧调用；Debian 版本不得自行裁剪或改写。"""
+    return version.strip()
 
 
 def compare_versions(version_a: str, version_b: str) -> int:
@@ -66,31 +68,25 @@ def compare_versions(version_a: str, version_b: str) -> int:
         1: a > b
         -1: a < b
     """
-    # 标准化
     norm_a = normalize_version(version_a)
     norm_b = normalize_version(version_b)
-
-    # 字符串相等
-    if norm_a == norm_b:
-        return 0
-
+    validate_version(norm_a)
+    validate_version(norm_b)
     try:
-        v_a = Version(norm_a)
-        v_b = Version(norm_b)
-
-        if v_a > v_b:
-            return 1
-        elif v_a < v_b:
-            return -1
-        else:
-            return 0
-    except InvalidVersion:
-        # 无法解析时，使用字符串比较
-        if norm_a > norm_b:
-            return 1
-        elif norm_a < norm_b:
-            return -1
-        return 0
+        for operator, comparison in (("gt", 1), ("lt", -1), ("eq", 0)):
+            result = subprocess.run(
+                ["dpkg", "--compare-versions", norm_a, operator, norm_b],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                return comparison
+            if result.returncode != 1:
+                raise VersionError(f"无法比较版本：{result.stderr.strip()}")
+    except (subprocess.TimeoutExpired, OSError) as error:
+        raise VersionError("无法比较版本：dpkg 执行失败") from error
+    raise VersionError("无法比较版本：dpkg 返回不一致的比较结果")
 
 
 def is_update_needed(installed_version: Optional[str], latest_version: str) -> bool:
@@ -101,7 +97,8 @@ def is_update_needed(installed_version: Optional[str], latest_version: str) -> b
         False: 不需要更新
     """
     # 未安装，需要安装
-    if not installed_version:
+    if installed_version is None:
+        validate_version(latest_version)
         return True
 
     # 比较版本

@@ -312,6 +312,17 @@ main.container {
     font-size: 0.8125rem;
 }
 
+a.pkg-repo {
+    display: inline-block;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+a.pkg-repo:hover {
+    color: var(--primary);
+    text-decoration: underline;
+}
+
 .table .actions {
     text-align: right;
     white-space: nowrap;

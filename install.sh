@@ -172,7 +172,7 @@ install_web() {
     echo "安装 Python 依赖..."
     sudo pip3 install -r "${SCRIPT_DIR}/requirements.txt" --quiet 2>/dev/null || {
         echo -e "${YELLOW}警告: pip3 安装失败，尝试使用 apt 安装...${NC}"
-        sudo apt-get install -y python3-fastapi python3-uvicorn python3-jinja2 python3-httpx python3-yaml python3-packaging 2>/dev/null || {
+        sudo apt-get install -y python3-fastapi python3-uvicorn python3-websockets python3-jinja2 python3-httpx python3-yaml python3-packaging 2>/dev/null || {
             echo -e "${RED}错误: 无法安装 Python 依赖${NC}"
             echo "请手动运行: sudo pip3 install -r ${SCRIPT_DIR}/requirements.txt"
             exit 1

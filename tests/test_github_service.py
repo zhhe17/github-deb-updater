@@ -4,6 +4,28 @@ from app.services.github import GitHubService
 
 
 class CompatibleReleaseTests(unittest.TestCase):
+    def test_release_info_keeps_tag_separate_from_deb_version(self):
+        releases = [
+            {
+                "tag_name": "2.1.2.3",
+                "assets": [
+                    {
+                        "id": 5281,
+                        "name": "PiliPlus_2.1.2+5281_amd64.deb",
+                        "browser_download_url": "https://example.invalid/piliplus.deb",
+                        "size": 123,
+                    }
+                ],
+            }
+        ]
+
+        result = GitHubService._find_release_info(releases, "PiliPlus_*_amd64.deb")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.tag_name, "2.1.2.3")
+        self.assertEqual(result.release_version, "2.1.2.3")
+        self.assertEqual(result.asset_id, 5281)
+
     def test_uses_newest_stable_release_containing_matching_asset(self):
         releases = [
             {

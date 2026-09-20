@@ -157,10 +157,16 @@ for release in releases:
             version = tag[1:] if tag.startswith("v") else tag
             url = asset.get("browser_download_url", "")
             if version and url:
-                print(f"{version}|{url}")
+                if sys.argv[2] == "metadata":
+                    asset_id = asset.get("id", 0)
+                    size = asset.get("size", 0)
+                    updated = asset.get("updated_at") or ""
+                    print(f"{version}|{url}|{asset_id}|{size}|{updated}")
+                else:
+                    print(f"{version}|{url}")
                 sys.exit(0)
 sys.exit(1)
-' "$asset_pattern" <<< "$response") || true
+' "$asset_pattern" "${3:-}" <<< "$response") || true
 
     if [[ -z "$compatible_release" ]]; then
         log_warn "在 $repo 最近的正式 Release 中未找到匹配 '$asset_pattern' 的资产"

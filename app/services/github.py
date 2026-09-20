@@ -8,6 +8,7 @@ from typing import Optional
 import httpx
 
 from app.config import config
+from app.models import ReleaseInfo
 
 GITHUB_API_BASE = "https://api.github.com"
 
@@ -73,7 +74,9 @@ class GitHubService:
                 if response.status_code in (403, 429):
                     # 速率限制，等待后重试
                     wait = (attempt + 1) * 5
-                    print(f"[GitHub] 速率限制 {response.status_code}，等待 {wait}s 后重试: {url}")
+                    print(
+                        f"[GitHub] 速率限制 {response.status_code}，等待 {wait}s 后重试: {url}"
+                    )
                     await asyncio.sleep(wait)
                     continue
 
@@ -81,7 +84,9 @@ class GitHubService:
                     return None
 
                 # 其他错误，等待后重试
-                print(f"[GitHub] HTTP {response.status_code}，第 {attempt+1} 次尝试: {url}")
+                print(
+                    f"[GitHub] HTTP {response.status_code}，第 {attempt + 1} 次尝试: {url}"
+                )
                 if attempt < max_retries - 1:
                     wait = (attempt + 1) * 2
                     await asyncio.sleep(wait)
@@ -90,7 +95,9 @@ class GitHubService:
                 return None
 
             except (httpx.NetworkError, httpx.TimeoutException) as e:
-                print(f"[GitHub] 网络错误 (第 {attempt+1} 次): {type(e).__name__}: {e}")
+                print(
+                    f"[GitHub] 网络错误 (第 {attempt + 1} 次): {type(e).__name__}: {e}"
+                )
                 if attempt < max_retries - 1:
                     wait = (attempt + 1) * 2
                     await asyncio.sleep(wait)
@@ -115,11 +122,13 @@ class GitHubService:
         assets = []
 
         for asset in data.get("assets", []):
-            assets.append({
-                "name": asset.get("name", ""),
-                "url": asset.get("browser_download_url", ""),
-                "size": asset.get("size", 0),
-            })
+            assets.append(
+                {
+                    "name": asset.get("name", ""),
+                    "url": asset.get("browser_download_url", ""),
+                    "size": asset.get("size", 0),
+                }
+            )
 
         return {
             "tag_name": tag_name,
@@ -170,6 +179,41 @@ class GitHubService:
                         return version, url
         return None, None
 
+    @staticmethod
+    def _find_release_info(
+        releases: list[dict], asset_pattern: str
+    ) -> Optional[ReleaseInfo]:
+        """标签只负责定位 Release；返回确定资产，不把标签当作 deb 版本。"""
+        for release in releases:
+            if release.get("draft") or release.get("prerelease"):
+                continue
+            for asset in release.get("assets", []):
+                if not fnmatch.fnmatchcase(asset.get("name", ""), asset_pattern):
+                    continue
+                asset_id = asset.get("id")
+                tag = release.get("tag_name", "")
+                url = asset.get("browser_download_url", "")
+                if isinstance(asset_id, int) and asset_id > 0 and tag and url:
+                    return ReleaseInfo(
+                        asset_id=asset_id,
+                        tag_name=tag,
+                        release_version=GitHubService._version_from_tag(tag),
+                        asset_name=asset.get("name", ""),
+                        download_url=url,
+                        asset_size=asset.get("size", 0) or 0,
+                        asset_updated_at=asset.get("updated_at"),
+                    )
+        return None
+
+    async def get_release_info(
+        self, repo: str, asset_pattern: str
+    ) -> Optional[ReleaseInfo]:
+        url = f"{GITHUB_API_BASE}/repos/{repo}/releases?per_page=20"
+        releases = await self._request_with_retry(url)
+        if not isinstance(releases, list):
+            return None
+        return self._find_release_info(releases, asset_pattern)
+
     async def get_version_and_url(
         self, repo: str, asset_pattern: str
     ) -> tuple[Optional[str], Optional[str]]:
@@ -178,11 +222,10 @@ class GitHubService:
         Returns:
             tuple: (version, download_url)
         """
-        url = f"{GITHUB_API_BASE}/repos/{repo}/releases?per_page=20"
-        releases = await self._request_with_retry(url)
-        if not isinstance(releases, list):
+        release = await self.get_release_info(repo, asset_pattern)
+        if not release:
             return None, None
-        return self._find_compatible_release(releases, asset_pattern)
+        return release.release_version, release.download_url
 
 
 # 全局服务实例

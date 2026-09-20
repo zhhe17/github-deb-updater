@@ -1,5 +1,6 @@
 # 忽略缓存目录中的下载文件
 cache/*.deb
+cache/metadata/
 
 # 忽略日志文件
 logs/*.log

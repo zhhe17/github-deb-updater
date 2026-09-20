@@ -10,6 +10,7 @@ import httpx
 
 from app.config import config
 from app.models import UpdateResult
+from app.services.version import compare_versions, get_installed_version
 
 
 def _get_proxy_url() -> Optional[str]:
@@ -111,6 +112,44 @@ def _verify_deb(path: Path) -> bool:
         return False
 
 
+def inspect_deb(path: Path) -> Optional[dict[str, str]]:
+    """读取 deb 的身份信息；这里得到的 Version 才能用于更新判断。"""
+    values: dict[str, str] = {}
+    try:
+        for field in ("Package", "Version", "Architecture"):
+            result = subprocess.run(
+                ["dpkg-deb", "-f", str(path), field],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                return None
+            values[field] = result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    return {
+        "package": values["Package"],
+        "version": values["Version"],
+        "architecture": values["Architecture"],
+    }
+
+
+def get_system_architecture() -> Optional[str]:
+    """返回 dpkg 当前系统架构。"""
+    try:
+        result = subprocess.run(
+            ["dpkg", "--print-architecture"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    architecture = result.stdout.strip()
+    return architecture if result.returncode == 0 and architecture else None
+
+
 def _run_shell(cmd: str, timeout: int = 60) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
@@ -134,9 +173,35 @@ async def install_deb(
     deb_path: Path,
     pre_install_cmd: str = "",
     post_install_cmd: str = "",
+    expected_package: Optional[str] = None,
+    expected_version: Optional[str] = None,
 ) -> UpdateResult:
     """安装 deb 包（子进程放到线程池，避免阻塞事件循环）"""
-    package_name = deb_path.stem.split("_")[0]
+    metadata = await asyncio.to_thread(inspect_deb, deb_path)
+    package_name = (
+        expected_package
+        or (metadata or {}).get("package")
+        or deb_path.stem.split("_")[0]
+    )
+    if not metadata:
+        return UpdateResult(
+            success=False, message="deb 元数据无效", package_name=package_name
+        )
+    if expected_package and metadata["package"] != expected_package:
+        return UpdateResult(
+            success=False,
+            message=f"deb 内部包名为 {metadata['package']}，与配置 {expected_package} 不一致",
+            package_name=expected_package,
+        )
+    if (
+        expected_version
+        and compare_versions(metadata["version"], expected_version) != 0
+    ):
+        return UpdateResult(
+            success=False,
+            message=f"deb 内部版本 {metadata['version']} 与候选版本 {expected_version} 不一致",
+            package_name=package_name,
+        )
 
     if pre_install_cmd:
         try:
@@ -211,10 +276,22 @@ async def install_deb(
         except subprocess.TimeoutExpired:
             pass
 
+    installed_version = await asyncio.to_thread(get_installed_version, package_name)
+    if (
+        not installed_version
+        or compare_versions(installed_version, metadata["version"]) != 0
+    ):
+        return UpdateResult(
+            success=False,
+            message=f"安装命令完成，但版本复核失败（期望 {metadata['version']}，实际 {installed_version or '未安装'}）",
+            package_name=package_name,
+            new_version=installed_version,
+        )
     return UpdateResult(
         success=True,
-        message="安装成功",
+        message="安装成功并已通过版本复核",
         package_name=package_name,
+        new_version=installed_version,
     )
 
 
