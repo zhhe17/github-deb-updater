@@ -23,17 +23,41 @@ class AppConfig(BaseModel):
 
 
 class PackageConfig(BaseModel):
+    """软件包配置。
+
+    source 决定"最新 deb 指针"从哪里解析：
+    - github（默认）: repo + asset_pattern 定位 GitHub Release 资产
+    - url:    官网固定的 latest 下载链接
+    - feed:   厂商 JSON 配置接口 + 点分取值路径
+    - scrape: 抓取下载页面，用 asset_pattern 从页面链接中筛选
+    """
+
     name: str
     display_name: str = ""
-    repo: str
-    asset_pattern: str
+    repo: str = ""
+    asset_pattern: str = ""
     pre_install: str = ""
     post_install: str = ""
+    source: str = "github"
+    url: str = ""
+    feed_url: str = ""
+    feed_path: str = ""
+    page_url: str = ""
+    sign_command: str = ""
 
     def __init__(self, **data):
         super().__init__(**data)
         if not self.display_name:
             self.display_name = self.name
+        if not self.source:
+            self.source = "github"
+
+    @property
+    def browse_url(self) -> str:
+        """前端"前往发布页"链接。"""
+        if (self.source or "github") == "github" and self.repo:
+            return f"https://github.com/{self.repo}/releases"
+        return self.page_url or self.url or self.feed_url or ""
 
 
 class Config:

@@ -13,6 +13,16 @@ def asset_key(repo: str, asset_id: int, size: int, updated_at: str, url: str) ->
     return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
 
+def web_asset_key(path: str, etag: str, last_modified: str, size: int) -> str:
+    """官网/CDN 源的缓存身份：稳定路径 + 服务器身份头。
+
+    签名跳转链的 sign 参数每次都变，因此只取最终路径，
+    用 ETag / Last-Modified / Content-Length 区分资产版本。
+    """
+    identity = ["web", path, etag, last_modified, size]
+    return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+
+
 def read_metadata(cache_dir: Path, key: str):
     try:
         record = json.loads((cache_dir / "metadata" / f"{key}.json").read_text())
@@ -39,6 +49,9 @@ def write_metadata(cache_dir: Path, key: str, metadata: dict) -> None:
         ) as stream:
             temporary = Path(stream.name)
             json.dump({"schema": 1, "identity": key, "metadata": metadata}, stream)
+        # 缓存内容只有包名/版本/架构，无敏感信息；固定 0644，
+        # 避免 root 服务写出的文件普通用户 CLI 读不到。
+        temporary.chmod(0o644)
         os.replace(temporary, directory / f"{key}.json")
     except OSError as error:
         logging.getLogger(__name__).warning("无法保存候选版本缓存：%s", error)
@@ -55,6 +68,9 @@ if __name__ == "__main__":
     if action == "key":
         repo, asset_id, size, updated, url = args
         print(asset_key(repo, int(asset_id), int(size), updated, url))
+    elif action == "webkey":
+        path, etag, last_modified, size = args
+        print(web_asset_key(path, etag, last_modified, int(size)))
     elif action == "read":
         directory, key, package, architecture = args
         metadata = read_metadata(Path(directory), key)

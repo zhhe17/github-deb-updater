@@ -9,8 +9,8 @@ from fastapi.templating import Jinja2Templates
 from app.config import config
 from app.models import UpdateResult
 from app.services.candidates import CandidateError, get_candidate_package
-from app.services.github import github_service
 from app.services.installer import install_deb
+from app.services.resolver import ResolverError, resolve_release
 from app.services.version import VersionError, get_installed_version, is_update_needed
 
 router = APIRouter(prefix="/updates", tags=["updates"])
@@ -20,11 +20,12 @@ templates = Jinja2Templates(directory="app/templates")
 async def _upgrade_one(pkg) -> UpdateResult:
     """执行单个软件包升级"""
     local_version = await asyncio.to_thread(get_installed_version, pkg.name)
-    release = await github_service.get_release_info(pkg.repo, pkg.asset_pattern)
-    if not release:
+    try:
+        release = await resolve_release(pkg)
+    except ResolverError as error:
         return UpdateResult(
             success=False,
-            message=f"未找到匹配 {pkg.asset_pattern} 的正式 Release 资产",
+            message=str(error),
             package_name=pkg.name,
             old_version=local_version,
         )
@@ -113,14 +114,10 @@ async def websocket_upgrade(websocket: WebSocket, name: str):
         )
 
         local_version = await asyncio.to_thread(get_installed_version, pkg.name)
-        release = await github_service.get_release_info(pkg.repo, pkg.asset_pattern)
-        if not release:
-            await websocket.send_json(
-                {
-                    "status": "error",
-                    "message": f"未找到匹配模式的正式 Release 资产: {pkg.asset_pattern}",
-                }
-            )
+        try:
+            release = await resolve_release(pkg)
+        except ResolverError as error:
+            await websocket.send_json({"status": "error", "message": str(error)})
             await websocket.close()
             return
 

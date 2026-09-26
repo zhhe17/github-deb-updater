@@ -22,8 +22,8 @@ class PackageErrorTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(packages.config, "packages", [pkg]),
             patch.object(
-                packages.github_service, "get_release_info", new=AsyncMock()
-            ) as github,
+                packages, "resolve_release", new=AsyncMock()
+            ) as resolve,
         ):
             checked = await packages.api_check_updates()
             self.assertEqual(checked.total, 1)
@@ -32,7 +32,7 @@ class PackageErrorTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("无法读取", checked.packages[0].error_message)
             listed = await packages.api_list_packages()
             self.assertEqual(listed["packages"][0]["status"], "error")
-            github.assert_not_awaited()
+            resolve.assert_not_awaited()
 
     async def test_comparison_failure_is_reported_in_check(self):
         pkg = SimpleNamespace(
@@ -44,8 +44,8 @@ class PackageErrorTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(packages, "get_installed_version", return_value="1.0"),
             patch.object(
-                packages.github_service,
-                "get_release_info",
+                packages,
+                "resolve_release",
                 new=AsyncMock(return_value=object()),
             ),
             patch.object(

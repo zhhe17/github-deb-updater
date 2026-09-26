@@ -24,6 +24,8 @@ class PackageInfo(BaseModel):
     display_name: str
     repo: str
     asset_pattern: str
+    source: str = "github"
+    browse_url: str = ""
     local_version: Optional[str] = None
     latest_version: Optional[str] = None
     status: PackageStatus = PackageStatus.NOT_INSTALLED
@@ -31,15 +33,19 @@ class PackageInfo(BaseModel):
 
 
 class ReleaseInfo(BaseModel):
-    """GitHub Release 中一个确定的 deb 资产。"""
+    """GitHub Release 或官网/CDN 渠道中一个确定的 deb 资产。"""
 
-    asset_id: int
-    tag_name: str
-    release_version: str
-    asset_name: str
+    asset_id: int = 0
+    tag_name: str = ""
+    release_version: str = ""
+    asset_name: str = ""
     download_url: str
     asset_size: int = 0
     asset_updated_at: Optional[str] = None
+    source: str = "github"
+    # 官网/CDN 源使用：ETag 与重定向解析后的稳定路径，用于构建缓存身份。
+    etag: Optional[str] = None
+    identity_path: str = ""
 
     @property
     def cache_key(self) -> str:

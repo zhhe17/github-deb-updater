@@ -67,7 +67,7 @@
                     <td colspan="5">
                         <div class="inline-loading" style="justify-content:center">
                             <span class="spinner lg"></span>
-                            <span>正在检查更新（请求 GitHub，可能需要十几秒）...</span>
+                            <span>正在检查更新（请求各软件源，可能需要十几秒）...</span>
                         </div>
                     </td>
                 </tr>
@@ -80,8 +80,8 @@
                                :href="getReleasesUrl(pkg)"
                                target="_blank"
                                rel="noopener noreferrer"
-                               :title="'前往 ' + (pkg.display_name || pkg.name) + ' 的 GitHub Releases 下载页'"
-                               x-text="pkg.repo"></a>
+                               :title="'前往 ' + (pkg.display_name || pkg.name) + ' 的发布页面'"
+                               x-text="getSourceLabel(pkg)"></a>
                         </td>
                         <td x-text="pkg.local_version || '-'"></td>
                         <td x-text="pkg.latest_version || '-'"></td>
@@ -219,12 +219,26 @@ function packageList() {
         },
 
         getReleasesUrl(pkg) {
+            if (pkg && pkg.browse_url) return pkg.browse_url;
             if (!pkg || !pkg.repo) return '#';
             const repo = pkg.repo.trim();
             if (repo.startsWith('http://') || repo.startsWith('https://')) {
                 return repo.endsWith('/releases') ? repo : repo.replace(/\/+$/, '') + '/releases';
             }
             return 'https://github.com/' + repo.replace(/^\/+/, '').replace(/\/+$/, '') + '/releases';
+        },
+
+        getSourceLabel(pkg) {
+            if (!pkg) return '';
+            if (pkg.repo) return pkg.repo;
+            if (pkg.browse_url) {
+                try {
+                    return new URL(pkg.browse_url).host;
+                } catch (e) {
+                    return pkg.browse_url;
+                }
+            }
+            return '';
         },
 
         showNotification(type, message) {
@@ -285,7 +299,7 @@ function packageList() {
         async checkUpdates() {
             try {
                 this.checking = true;
-                this.showProgress('检查更新', '正在向 GitHub 查询最新版本...');
+                this.showProgress('检查更新', '正在向各软件源查询最新版本...');
                 await this.fetchPackages({ silent: true });
                 this.showNotification('success', '已刷新软件包列表');
             } catch (e) {

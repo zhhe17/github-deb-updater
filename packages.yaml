@@ -1,31 +1,97 @@
 packages:
-- asset_pattern: Clash.Verge_*_amd64.deb
-  display_name: Clash Verge
-  name: clash-verge
-  post_install: ''
-  pre_install: ''
-  repo: clash-verge-rev/clash-verge-rev
-- asset_pattern: LocalSend-*-linux-x86-64.deb
-  display_name: LocalSend
-  name: localsend
-  post_install: ''
-  pre_install: ''
-  repo: localsend/localsend
-- asset_pattern: rustdesk-*-x86_64.deb
-  display_name: RustDesk
-  name: rustdesk
-  post_install: ''
-  pre_install: ''
-  repo: rustdesk/rustdesk
-- asset_pattern: Hiddify-Debian-x64.deb
-  display_name: Hiddify
-  name: hiddify
-  post_install: ''
-  pre_install: ''
-  repo: hiddify/hiddify-app
-- asset_pattern: PiliPlus_linux_*_amd64.deb
-  display_name: PiliPlus
-  name: piliplus
-  post_install: ''
-  pre_install: ''
-  repo: bggRGjQaUbCoE/PiliPlus
+  - name: clash-verge
+    display_name: Clash Verge
+    repo: clash-verge-rev/clash-verge-rev
+    asset_pattern: Clash.Verge_*_amd64.deb
+    pre_install: ''
+    post_install: ''
+    source: github
+    url: ''
+    feed_url: ''
+    feed_path: ''
+    page_url: ''
+    sign_command: ''
+  - name: localsend
+    display_name: LocalSend
+    repo: localsend/localsend
+    asset_pattern: LocalSend-*-linux-x86-64.deb
+    pre_install: ''
+    post_install: ''
+    source: github
+    url: ''
+    feed_url: ''
+    feed_path: ''
+    page_url: ''
+    sign_command: ''
+  - name: rustdesk
+    display_name: RustDesk
+    repo: rustdesk/rustdesk
+    asset_pattern: rustdesk-*-x86_64.deb
+    pre_install: ''
+    post_install: ''
+    source: github
+    url: ''
+    feed_url: ''
+    feed_path: ''
+    page_url: ''
+    sign_command: ''
+  - name: hiddify
+    display_name: Hiddify
+    repo: hiddify/hiddify-app
+    asset_pattern: Hiddify-Debian-x64.deb
+    pre_install: ''
+    post_install: ''
+    source: github
+    url: ''
+    feed_url: ''
+    feed_path: ''
+    page_url: ''
+    sign_command: ''
+  - name: piliplus
+    display_name: PiliPlus
+    repo: bggRGjQaUbCoE/PiliPlus
+    asset_pattern: PiliPlus_linux_*_amd64.deb
+    pre_install: ''
+    post_install: ''
+    source: github
+    url: ''
+    feed_url: ''
+    feed_path: ''
+    page_url: ''
+    sign_command: ''
+  - name: wechat
+    display_name: 微信
+    source: url
+    url: https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb
+  - name: linuxqq
+    display_name: QQ
+    source: feed
+    feed_url: https://qq-web.cdn-go.cn/im.qq.com_new/latest/rainbow/pcConfig.json
+    feed_path: Linux.x64DownloadUrl.deb
+    sign_command: scripts/sign-qq.sh
+  - name: qqmusic
+    display_name: QQ 音乐
+    source: scrape
+    page_url: https://y.qq.com/download/download.html
+    asset_pattern: qqmusic_*_amd64.deb
+  - name: zcode
+    display_name: ZCode
+    source: scrape
+    page_url: https://zcode.z.ai
+    asset_pattern: ZCode-*-linux-x64.deb
+  - name: iriunwebcam
+    display_name: Iriun Webcam
+    source: scrape
+    page_url: https://iriun.com
+    asset_pattern: iriunwebcam-*.deb
+  - name: wemeet
+    display_name: 腾讯会议
+    source: feed
+    feed_url: https://meeting.tencent.com/web-service/query-download-info?q=%5B%7B%22package-type%22%3A%22app%22%2C%22channel%22%3A%220300000000%22%2C%22platform%22%3A%22linux%22%2C%22arch%22%3A%22x86_64%22%2C%22decorators%22%3A%5B%22deb%22%5D%7D%5D&nonce=0123456789abcdef&c_os=web
+    feed_path: info-list.0.url
+  - name: wps-office
+    display_name: WPS Office
+    source: scrape
+    page_url: https://linux.wps.cn/
+    asset_pattern: wps-office_*_amd64.deb
+    sign_command: scripts/sign-wps.sh

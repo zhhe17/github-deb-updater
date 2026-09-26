@@ -5,15 +5,23 @@
 # 缓存目录（由主脚本设置）
 CACHE_DIR="${CACHE_DIR:-cache}"
 
-# 仅检查时可复用元数据；安装路径总是重新下载/校验。
+# 获取候选 deb 的内部版本
+# 用法: get_candidate_version <包名> <下载URL> <缓存键> <资产大小> [check|install]
+# 输出: check 模式 → 版本号；install 模式 → 版本|deb路径
+# check 模式在元数据缓存未命中时，先尝试 Range 部分读 control 段，
+# 服务器不支持 Range 或解析失败时回退全量下载。
 get_candidate_version() {
-    local repo="$1" name="$2" url="$3" asset_id="$4" size="$5" updated="$6" mode="${7:-check}"
+    local name="$1" url="$2" key="$3" size="$4" mode="${5:-check}"
     local helper="${SCRIPT_DIR}/app/services/metadata_cache.py"
-    local key architecture version deb_path internal_architecture
-    key=$(python3 "$helper" key "$repo" "$asset_id" "$size" "$updated" "$url") || return 1
+    local web_helper="${SCRIPT_DIR}/app/services/web_source.py"
+    local architecture version deb_path internal_architecture
+    # 键为 nocache 表示来源无身份头（ETag/Last-Modified/大小全空），
+    # 元数据缓存会永久命中旧版本，跳过所有缓存读写。
+    local cacheable=true
+    [[ "$key" == "nocache" ]] && cacheable=false
     architecture=$(dpkg --print-architecture) || return 1
     [[ -n "$architecture" ]] || return 1
-    if [[ "$mode" == check && "${NO_CACHE:-false}" != true ]]; then
+    if [[ "$mode" == check && "$cacheable" == true && "${NO_CACHE:-false}" != true ]]; then
         if version=$(python3 "$helper" read "$CACHE_DIR" "$key" "$name" "$architecture") && validate_version "$version"; then
             printf '%s\n' "$version"
             return 0
@@ -22,9 +30,28 @@ get_candidate_version() {
     if [[ "${NO_CACHE:-false}" == true ]]; then
         rm -f "${CACHE_DIR}/${name}_${key}.deb"
     fi
+    if [[ "$mode" == check ]]; then
+        local head_meta head_name head_version head_arch
+        if head_meta=$(python3 "$web_helper" control "$url"); then
+            IFS='|' read -r head_name head_version head_arch <<< "$head_meta"
+            if [[ "$head_name" == "$name" \
+                && ( "$head_arch" == "$architecture" || "$head_arch" == all ) ]] \
+                && validate_version "$head_version"; then
+                if [[ "$cacheable" == true ]]; then
+                    python3 "$helper" write "$CACHE_DIR" "$key" "$name" "$head_arch" "$head_version" || true
+                fi
+                printf '%s\n' "$head_version"
+                return 0
+            fi
+            # 部分读结果与配置不一致：CDN 可能对同一资产返回新旧不同构建
+            # （上游重传后边缘缓存不一致），不轻信，回退全量下载复核。
+            log_warn "部分读取的 deb (${head_name} ${head_version}) 与配置不符，回退全量下载复核"
+        fi
+        # 部分读失败（服务器不支持 Range、control 段异常等）→ 继续全量下载。
+    fi
     deb_path=$(download_deb "$url" "$name" "$key") || return 1
     if [[ "$size" -gt 0 && "$(stat -c %s "$deb_path")" != "$size" ]]; then
-        log_error "deb 文件大小与 GitHub 资产不符"
+        log_error "deb 文件大小与来源声明不符"
         rm -f "$deb_path"
         return 1
     fi
@@ -35,7 +62,9 @@ get_candidate_version() {
         log_error "deb 架构与当前系统不匹配"
         return 1
     fi
-    python3 "$helper" write "$CACHE_DIR" "$key" "$name" "$internal_architecture" "$version" || return 1
+    if [[ "$cacheable" == true ]]; then
+        python3 "$helper" write "$CACHE_DIR" "$key" "$name" "$internal_architecture" "$version" || return 1
+    fi
     if [[ "$mode" == install ]]; then
         printf '%s|%s\n' "$version" "$deb_path"
     else
@@ -64,12 +93,15 @@ download_deb() {
     local version="$3"
     local safe_version="${version//\//_}"
     local target_path="${CACHE_DIR}/${package_name}_${safe_version}.deb"
-    
+
     # 确保缓存目录存在
     mkdir -p "$CACHE_DIR" 2>/dev/null
-    
-    # 检查文件是否已存在且完整
-    if [[ -f "$target_path" ]]; then
+
+    if [[ "$safe_version" == nocache ]]; then
+        # 无身份头的来源不复用旧文件：每次下载到一次性路径，
+        # 避免 install 模式把缓存里的旧版本当"最新"装上去。
+        target_path=$(mktemp "${CACHE_DIR}/${package_name}_nocache.XXXXXX.deb")
+    elif [[ -f "$target_path" ]]; then
         log_info "缓存中已存在 $target_path，验证完整性..."
         if dpkg-deb --info "$target_path" &>/dev/null; then
             log_info "缓存文件完整，跳过下载"

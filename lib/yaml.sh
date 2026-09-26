@@ -32,7 +32,7 @@ init_yaml_parser() {
 }
 
 # 解析 packages.yaml 并输出结构化数据
-# 输出格式（每行）: name|display_name|repo|asset_pattern|pre_install|post_install
+# 输出格式（每行）: name|display_name|repo|asset_pattern|pre_install|post_install|source|url|feed_url|feed_path|page_url|sign_command
 parse_packages_yaml() {
     local yaml_file="$1"
     
@@ -79,8 +79,16 @@ try:
         asset_pattern = pkg.get('asset_pattern', '')
         pre_install = pkg.get('pre_install', '')
         post_install = pkg.get('post_install', '')
-        
-        print(f'{name}|{display_name}|{repo}|{asset_pattern}|{pre_install}|{post_install}')
+        source = pkg.get('source', '') or 'github'
+        url = pkg.get('url', '')
+        feed_url = pkg.get('feed_url', '')
+        feed_path = pkg.get('feed_path', '')
+        page_url = pkg.get('page_url', '')
+        sign_command = pkg.get('sign_command', '')
+
+        print('|'.join((name, display_name, repo, asset_pattern, pre_install,
+                        post_install, source, url, feed_url, feed_path,
+                        page_url, sign_command)))
 
 except Exception as e:
     print(f'YAML 解析错误: {e}', file=sys.stderr)
@@ -101,23 +109,33 @@ _parse_yaml_grep() {
     local current_asset_pattern=""
     local current_pre_install=""
     local current_post_install=""
+    local current_source=""
+    local current_url=""
+    local current_feed_url=""
+    local current_feed_path=""
+    local current_page_url=""
+    local current_sign_command=""
     local in_package=false
-    
+
+    # 输出累积的包记录
+    _emit_package() {
+        [[ -n "$current_name" ]] || return 0
+        echo "${current_name}|${current_display_name}|${current_repo}|${current_asset_pattern}|${current_pre_install}|${current_post_install}|${current_source:-github}|${current_url}|${current_feed_url}|${current_feed_path}|${current_page_url}|${current_sign_command}"
+    }
+
     # 逐行读取 YAML 文件
     while IFS= read -r line; do
         # 移除注释
         line=$(echo "$line" | sed 's/#.*$//')
-        
+
         # 跳过空行
         [[ -z "$line" ]] && continue
-        
+
         # 检测新包的开始
         if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*name:[[:space:]]*\"?([^\"]+)\"? ]]; then
             # 输出前一个包（如果存在）
-            if [[ -n "$current_name" ]]; then
-                echo "${current_name}|${current_display_name}|${current_repo}|${current_asset_pattern}|${current_pre_install}|${current_post_install}"
-            fi
-            
+            _emit_package
+
             # 初始化新包
             current_name="${BASH_REMATCH[1]}"
             current_display_name="$current_name"
@@ -125,10 +143,16 @@ _parse_yaml_grep() {
             current_asset_pattern=""
             current_pre_install=""
             current_post_install=""
+            current_source=""
+            current_url=""
+            current_feed_url=""
+            current_feed_path=""
+            current_page_url=""
+            current_sign_command=""
             in_package=true
             continue
         fi
-        
+
         # 解析字段
         if [[ "$in_package" == true ]]; then
             if [[ "$line" =~ ^[[:space:]]*display_name:[[:space:]]*\"?([^\"]+)\"? ]]; then
@@ -141,12 +165,22 @@ _parse_yaml_grep() {
                 current_pre_install="${BASH_REMATCH[1]}"
             elif [[ "$line" =~ ^[[:space:]]*post_install:[[:space:]]*\"?([^\"]+)\"? ]]; then
                 current_post_install="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*source:[[:space:]]*\"?([^\"]+)\"? ]]; then
+                current_source="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*url:[[:space:]]*\"?([^\"]+)\"? ]]; then
+                current_url="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*feed_url:[[:space:]]*\"?([^\"]+)\"? ]]; then
+                current_feed_url="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*feed_path:[[:space:]]*\"?([^\"]+)\"? ]]; then
+                current_feed_path="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*page_url:[[:space:]]*\"?([^\"]+)\"? ]]; then
+                current_page_url="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*sign_command:[[:space:]]*\"?([^\"]+)\"? ]]; then
+                current_sign_command="${BASH_REMATCH[1]}"
             fi
         fi
     done < "$yaml_file"
-    
+
     # 输出最后一个包
-    if [[ -n "$current_name" ]]; then
-        echo "${current_name}|${current_display_name}|${current_repo}|${current_asset_pattern}|${current_pre_install}|${current_post_install}"
-    fi
+    _emit_package
 }

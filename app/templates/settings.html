@@ -62,28 +62,75 @@
     <!-- 添加软件包 -->
     <div class="card">
         <h2 class="card-title">添加软件包</h2>
-        <p class="card-desc">添加 GitHub 仓库中的 deb 包到管理列表。</p>
+        <p class="card-desc">
+            添加 deb 软件包到管理列表。来源支持 GitHub Release、官网固定 latest 链接、
+            厂商 JSON 配置接口和下载页面抓取。
+        </p>
         <form @submit.prevent="addPackage()">
             <div class="form-grid">
                 <div class="form-field">
                     <label>软件包名称 *</label>
                     <input class="input" type="text" x-model="newPackage.name" required
-                           placeholder="例如: clash-verge">
+                           placeholder="必须与 deb 内部包名一致，例如: wechat">
                 </div>
                 <div class="form-field">
                     <label>显示名称</label>
                     <input class="input" type="text" x-model="newPackage.display_name"
-                           placeholder="例如: Clash Verge">
+                           placeholder="例如: 微信">
                 </div>
                 <div class="form-field">
+                    <label>来源 *</label>
+                    <select class="select" x-model="newPackage.source">
+                        <option value="github">GitHub Release</option>
+                        <option value="url">官网固定 latest 链接</option>
+                        <option value="feed">厂商 JSON 配置接口</option>
+                        <option value="scrape">下载页面抓取</option>
+                    </select>
+                </div>
+                <div class="form-field" x-show="newPackage.source === 'github'">
                     <label>GitHub 仓库 *</label>
-                    <input class="input" type="text" x-model="newPackage.repo" required
+                    <input class="input" type="text" x-model="newPackage.repo"
+                           :required="newPackage.source === 'github'"
                            placeholder="例如: clash-verge-rev/clash-verge-rev">
                 </div>
-                <div class="form-field">
+                <div class="form-field"
+                     x-show="newPackage.source === 'github' || newPackage.source === 'scrape'">
                     <label>资产匹配模式 *</label>
-                    <input class="input" type="text" x-model="newPackage.asset_pattern" required
+                    <input class="input" type="text" x-model="newPackage.asset_pattern"
+                           :required="newPackage.source === 'github' || newPackage.source === 'scrape'"
                            placeholder="例如: Clash.Verge_*_amd64.deb">
+                </div>
+                <div class="form-field" x-show="newPackage.source === 'url'">
+                    <label>latest 下载链接 *</label>
+                    <input class="input" type="text" x-model="newPackage.url"
+                           :required="newPackage.source === 'url'"
+                           placeholder="固定指向最新 deb 的 URL">
+                </div>
+                <template x-if="newPackage.source === 'feed'">
+                    <div style="display:contents">
+                        <div class="form-field">
+                            <label>feed 地址 *</label>
+                            <input class="input" type="text" x-model="newPackage.feed_url" required
+                                   placeholder="厂商 JSON 配置接口 URL">
+                        </div>
+                        <div class="form-field">
+                            <label>取值路径 *</label>
+                            <input class="input" type="text" x-model="newPackage.feed_path" required
+                                   placeholder="点分路径，例如: Linux.x64DownloadUrl.deb">
+                        </div>
+                    </div>
+                </template>
+                <div class="form-field" x-show="newPackage.source === 'scrape'">
+                    <label>下载页面地址 *</label>
+                    <input class="input" type="text" x-model="newPackage.page_url"
+                           :required="newPackage.source === 'scrape'"
+                           placeholder="包含 deb 下载链接的页面 URL">
+                </div>
+                <div class="form-field" x-show="newPackage.source !== 'github'">
+                    <label>签名命令（可选）</label>
+                    <input class="input" type="text" x-model="newPackage.sign_command"
+                           placeholder="通过环境变量 SIGN_URL 接收原始链接，输出签名链接">
+                    <p class="form-hint">安全提示：签名命令与安装前后命令都在本机以服务权限直接执行，等同于任意命令执行，请仅填写你完全信任的脚本路径。</p>
                 </div>
             </div>
             <div class="form-actions">
@@ -138,8 +185,14 @@ function settings() {
         newPackage: {
             name: '',
             display_name: '',
+            source: 'github',
             repo: '',
             asset_pattern: '',
+            url: '',
+            feed_url: '',
+            feed_path: '',
+            page_url: '',
+            sign_command: '',
         },
         notification: {
             show: false,
@@ -198,18 +251,28 @@ function settings() {
             this.addingPackage = true;
             this.packageAdded = false;
             try {
+                const p = this.newPackage;
                 const params = new URLSearchParams({
-                    name: this.newPackage.name.trim(),
-                    repo: this.newPackage.repo.trim(),
-                    asset_pattern: this.newPackage.asset_pattern.trim(),
+                    name: p.name.trim(),
+                    source: p.source,
                 });
-                if (this.newPackage.display_name) {
-                    params.append('display_name', this.newPackage.display_name.trim());
+                const optionalFields = [
+                    'repo', 'asset_pattern', 'url', 'feed_url', 'feed_path',
+                    'page_url', 'sign_command', 'display_name',
+                ];
+                for (const field of optionalFields) {
+                    if (p[field] && p[field].trim()) {
+                        params.append(field, p[field].trim());
+                    }
                 }
 
                 await api.post('/packages/api/add', params, false);
                 this.packageAdded = true;
-                this.newPackage = { name: '', display_name: '', repo: '', asset_pattern: '' };
+                this.newPackage = {
+                    name: '', display_name: '', source: this.newPackage.source,
+                    repo: '', asset_pattern: '', url: '', feed_url: '',
+                    feed_path: '', page_url: '', sign_command: '',
+                };
                 this.showNotification('success', '软件包已添加');
             } catch (e) {
                 this.showNotification('error', e.message || '添加失败');

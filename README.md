@@ -1,6 +1,6 @@
 # GitHub deb 软件自动更新工具 (github-deb-updater)
 
-> 一站式管理来自 GitHub Release 的 `.deb` 软件包，类比 `apt update && apt upgrade`，但专门针对不在 apt 源中、仅在 GitHub 发布 deb 包的开源软件。
+> 一站式管理来自 GitHub Release 和软件官方网站的 `.deb` 软件包，类比 `apt update && apt upgrade`，但专门针对不在 apt 源中、通过 GitHub 或官网 CDN 发布 deb 包的开源软件。
 
 ## 版本说明
 
@@ -8,6 +8,62 @@
 
 - **CLI 版本**：命令行工具，适合终端用户
 - **Web 版本**：浏览器界面，提供图形化管理
+
+## 支持的软件来源
+
+每个软件包通过 `source` 字段声明"最新 deb 指针"的获取方式：
+
+| source | 机制 | 适用场景 |
+|--------|------|----------|
+| `github`（默认） | GitHub API 定位 Release 资产 | 在 GitHub 发布 deb 的项目 |
+| `url` | 官网固定的 latest 下载链接 | 提供"永远指向最新版"直链的官网（如微信） |
+| `feed` | 厂商 JSON 配置接口 + 取值路径 | 有版本配置接口的厂商（如 QQ 的 pcConfig.json） |
+| `scrape` | 抓取下载页面，按通配符筛选链接 | 下载页 HTML 直接列出 deb 链接的官网（如 ZCode、QQ 音乐） |
+
+不同来源共用同一套核心管线：下载/Range 部分读取 → 校验 deb 内部 `Package`/`Version`/`Architecture` → `dpkg` 版本比较 → 安装与装后复核。**版本号一律以 deb 内部字段为准**，来源侧的标签、文件名只用于展示。
+
+对需要签名才能下载的渠道（如 QQ 需经 `GetSign` 接口换取临时链接、WPS CDN 的 `t/k` 防盗链参数），通过可选的 `sign_command` 钩子接入：工具通过环境变量 `SIGN_URL` 传入原始链接，命令向 stdout 输出签名后的链接（参考 `scripts/sign-qq.sh`、`scripts/sign-wps.sh`）。
+
+### 已验证的官网来源示例
+
+```yaml
+packages:
+  # 官网固定 latest 链接（最简单、最稳定）
+  - name: wechat
+    display_name: 微信
+    source: url
+    url: "https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb"
+
+  # 厂商 JSON 配置接口 + 签名钩子
+  - name: linuxqq
+    display_name: QQ
+    source: feed
+    feed_url: "https://qq-web.cdn-go.cn/im.qq.com_new/latest/rainbow/pcConfig.json"
+    feed_path: "Linux.x64DownloadUrl.deb"
+    sign_command: "scripts/sign-qq.sh"
+
+  # 下载页面抓取
+  - name: zcode
+    display_name: ZCode
+    source: scrape
+    page_url: "https://zcode.z.ai"
+    asset_pattern: "ZCode-*-linux-x64.deb"
+
+  # 厂商下载信息接口（页面 JS 调用的 webapi，参数可静态化）
+  - name: wemeet
+    display_name: 腾讯会议
+    source: feed
+    feed_url: "https://meeting.tencent.com/web-service/query-download-info?q=%5B%7B%22package-type%22%3A%22app%22%2C%22channel%22%3A%220300000000%22%2C%22platform%22%3A%22linux%22%2C%22arch%22%3A%22x86_64%22%2C%22decorators%22%3A%5B%22deb%22%5D%7D%5D&nonce=0123456789abcdef&c_os=web"
+    feed_path: "info-list.0.url"
+
+  # 服务端渲染页面抓取 + CDN 防盗链签名钩子（签名算法可从页面内联 JS 逆出）
+  - name: wps-office
+    display_name: WPS Office
+    source: scrape
+    page_url: "https://linux.wps.cn/"
+    asset_pattern: "wps-office_*_amd64.deb"
+    sign_command: "scripts/sign-wps.sh"
+```
 
 ---
 
@@ -93,7 +149,13 @@ Release 标签只用于找到匹配的 deb 资产，不参与更新大小判断�
 
 版本格式非法、dpkg 比较失败、本地版本查询失败或安装状态异常时，会报告错误，不再按“已是最新”或“未安装”处理。
 
-Web 与 CLI 会将已验证的候选包名、版本和架构保存到缓存目录的 `metadata/` 中。缓存按仓库、资产 ID、大小、更新时间和下载 URL 区分；重复检查仅需获取 GitHub 资产信息，资产未变时无需重新下载 deb。清理旧 deb 不会删除这些元数据。缓存损坏或资产变化会触发重新读取，安装前仍需取得并校验实际 deb 文件；CLI 的 `--no-cache` 会绕过元数据缓存。
+Web 与 CLI 会将已验证的候选包名、版本和架构保存到缓存目录的 `metadata/` 中。GitHub 资产按仓库、资产 ID、大小、更新时间和下载 URL 区分；官网/CDN 资产按重定向解析后的稳定路径加 ETag、Last-Modified、Content-Length 区分（签名链接的 sign 参数每次都变，不参与身份计算），因此 CLI 与 Web 共享同一份缓存。资产未变时无需重新下载。清理旧 deb 不会删除这些元数据。缓存损坏或资产变化会触发重新读取，安装前仍需取得并校验实际 deb 文件；CLI 的 `--no-cache` 会绕过元数据缓存。
+
+### 检查更新为什么不需要下载完整安装包
+
+所有受支持的 CDN 都支持 HTTP Range 请求。检查更新时工具只按 deb 的 ar 头定位并读取 control 段（通常几百 KB）即可得到 `Package`/`Version`/`Architecture` 并写入元数据缓存；完整下载只发生在真正安装时。zstd 压缩的 control 段依赖系统 `zstd` 命令行工具（缺失时自动回退全量下载）。
+
+如果 Range 部分读到的元数据与配置不符（厂商重传资产后 CDN 边缘节点可能短暂返回新旧不同构建），工具不会轻信也不会误装，而是自动回退完整下载复核，仍不一致才报错。
 
 ### 界面截图
 
@@ -110,10 +172,16 @@ Web 与 CLI 会将已验证的候选包名、版本和架构保存到缓存目�
 
 | 字段 | 必填 | 说明 | 示例 |
 |------|------|------|------|
-| `name` | 是 | 软件包名称，用于 `dpkg -l` 查询（必须与实际 deb 包名一致） | `"clash-verge"` |
+| `name` | 是 | 软件包名称，用于 `dpkg -l` 查询（必须与 deb 内部包名一致，区分大小写） | `"clash-verge"` |
 | `display_name` | 否 | 显示名称（默认使用 name） | `"Clash Verge"` |
-| `repo` | 是 | GitHub 仓库，格式为 `owner/repo` | `"clash-verge-rev/clash-verge-rev"` |
-| `asset_pattern` | 是 | Release 资产文件名匹配模式（支持通配符） | `"Clash.Verge_*_amd64.deb"` |
+| `source` | 否 | 来源类型：`github`（默认）/ `url` / `feed` / `scrape` | `"url"` |
+| `repo` | github 来源必填 | GitHub 仓库，格式为 `owner/repo` | `"clash-verge-rev/clash-verge-rev"` |
+| `asset_pattern` | github/scrape 来源必填 | 资产文件名匹配模式（支持通配符） | `"Clash.Verge_*_amd64.deb"` |
+| `url` | url 来源必填 | 固定指向最新 deb 的下载链接 | `"https://dldir1v6.qq.com/.../WeChatLinux_x86_64.deb"` |
+| `feed_url` | feed 来源必填 | 厂商 JSON 配置接口地址 | `"https://qq-web.cdn-go.cn/.../pcConfig.json"` |
+| `feed_path` | feed 来源必填 | JSON 点分取值路径（支持数组下标） | `"Linux.x64DownloadUrl.deb"` |
+| `page_url` | scrape 来源必填 | 包含 deb 链接的下载页面 | `"https://zcode.z.ai"` |
+| `sign_command` | 否 | 签名命令：环境变量 `SIGN_URL` 收原始链接，stdout 出签名链接 | `"scripts/sign-qq.sh"` |
 | `pre_install` | 否 | 安装前执行的命令 | `"echo '准备安装'"` |
 | `post_install` | 否 | 安装后执行的命令 | `"echo '安装完成'"` |
 
@@ -274,9 +342,11 @@ github_token: "your_token_here"
 ## 已知限制
 
 1. **仅支持 amd64 架构**：当前仅支持 x86_64/amd64 平台
-2. **不支持 PPA**：仅支持从 GitHub Release 下载 deb 包
+2. **不支持 PPA / apt 源**：支持 GitHub Release 与官网 deb 下载；厂商提供了官方 apt 源的软件建议直接用 apt 管理
 3. **不支持回滚**：不支持版本回退，只能升级
 4. **需要 sudo 权限**：安装软件时需要 sudo 权限执行 `dpkg -i`
+5. **scrape 来源依赖页面结构**：官网改版可能导致解析失败（工具会显式报错，不会误装），需更新 `asset_pattern`
+6. **root 服务与普通用户 CLI 混用**：缓存条目固定以 0644 写入，双方都能读取；若历史上遗留过 root 属主的 `cache/metadata/` 目录（内部文件 600），将其改名或 `sudo chown -R $(id -u):$(id -g) cache` 一次性迁移即可
 
 ---
 

@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import config
 from app.models import CheckResult, PackageInfo, PackageStatus
 from app.services.candidates import CandidateError, get_candidate_package
-from app.services.github import github_service
+from app.services.resolver import ResolverError, resolve_release
 from app.services.installer import uninstall_package
 from app.services.version import VersionError, get_installed_version, is_update_needed
 
@@ -26,16 +26,14 @@ async def _get_package_info(pkg) -> PackageInfo:
         display_name=pkg.display_name,
         repo=pkg.repo,
         asset_pattern=pkg.asset_pattern,
+        source=getattr(pkg, "source", "github") or "github",
+        browse_url=getattr(pkg, "browse_url", ""),
     )
 
     # 本地版本（同步调用，放到线程池避免阻塞）
     try:
         info.local_version = await asyncio.to_thread(get_installed_version, pkg.name)
-        release = await github_service.get_release_info(pkg.repo, pkg.asset_pattern)
-        if release is None:
-            info.status = PackageStatus.ERROR
-            info.error_message = "无法获取包含匹配 deb 的正式 Release"
-            return info
+        release = await resolve_release(pkg)
         candidate = await get_candidate_package(pkg, release, require_file=False)
         info.latest_version = candidate.deb_version
 
@@ -45,7 +43,7 @@ async def _get_package_info(pkg) -> PackageInfo:
             info.status = PackageStatus.UPDATE_AVAILABLE
         else:
             info.status = PackageStatus.UP_TO_DATE
-    except CandidateError as e:
+    except (CandidateError, ResolverError) as e:
         info.status = PackageStatus.ERROR
         info.error_message = str(e)
     except Exception as e:
@@ -81,6 +79,8 @@ async def api_list_packages():
                 "display_name": pkg.display_name,
                 "repo": pkg.repo,
                 "asset_pattern": pkg.asset_pattern,
+                "source": getattr(pkg, "source", "github") or "github",
+                "browse_url": getattr(pkg, "browse_url", ""),
                 "local_version": local,
                 "latest_version": None,
                 "status": "error"
@@ -144,24 +144,32 @@ async def api_uninstall_package(name: str):
 @router.post("/api/add")
 async def api_add_package(
     name: str = Form(...),
-    repo: str = Form(...),
-    asset_pattern: str = Form(...),
+    repo: str = Form(""),
+    asset_pattern: str = Form(""),
+    source: str = Form("github"),
+    url: str = Form(""),
+    feed_url: str = Form(""),
+    feed_path: str = Form(""),
+    page_url: str = Form(""),
+    sign_command: str = Form(""),
     display_name: Optional[str] = Form(None),
     pre_install: Optional[str] = Form(None),
     post_install: Optional[str] = Form(None),
 ):
-    """添加软件包 API（form 提交）"""
+    """添加软件包 API（form 提交），支持 github/url/feed/scrape 四类来源"""
     name = name.strip()
     repo = repo.strip()
     asset_pattern = asset_pattern.strip()
+    source = (source or "github").strip() or "github"
 
-    if not name or not repo or not asset_pattern:
-        raise HTTPException(status_code=400, detail="名称、仓库和匹配模式不能为空")
+    if not name:
+        raise HTTPException(status_code=400, detail="名称不能为空")
 
     if config.get_package(name):
         raise HTTPException(status_code=400, detail=f"软件包 {name} 已存在")
 
     from app.config import PackageConfig
+    from app.services.resolver import ResolverError, validate_package_source
 
     new_pkg = PackageConfig(
         name=name,
@@ -170,7 +178,17 @@ async def api_add_package(
         asset_pattern=asset_pattern,
         pre_install=(pre_install or "").strip(),
         post_install=(post_install or "").strip(),
+        source=source,
+        url=url.strip(),
+        feed_url=feed_url.strip(),
+        feed_path=feed_path.strip(),
+        page_url=page_url.strip(),
+        sign_command=sign_command.strip(),
     )
+    try:
+        validate_package_source(new_pkg)
+    except ResolverError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
     config.packages.append(new_pkg)
     config.save_packages()
